@@ -94,7 +94,7 @@ Done:     photo.jpg | Photo Small x2 | 1920x1080 -> 3840x2160 | 4.37 s | GPU 0 (
 
 ## Compare mode
 
-![Compare mode screenshot](docs/compare.jpg)
+![Compare mode screenshot](docs/comparemode.jpg)
 
 Open it from the **Compare** button of a file, or by clicking one of its result chips.
 
