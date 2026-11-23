@@ -7,7 +7,7 @@
 Drop in a folder, pick a model and a factor, and compare the result against the original with a slider.
 Runs on **Windows** and **Linux**, uses your GPU through Vulkan, and never sends a single image over the internet.
 
-![Image Upscale W2X screenshot](docs/screenshot.png)
+![Image Upscale W2X screenshot](docs/screenshot-dark.png)
 
 </div>
 
@@ -104,7 +104,7 @@ Done:     photo.jpg | Photo Small x2 | 1920x1080 -> 3840x2160 | 4.37 s | GPU 0 (
 
 ## Compare mode
 
-![Compare mode screenshot](docs/compare.png)
+![Compare mode screenshot](docs/comparemode.png)
 
 <sub>↑ Put a screenshot of the compare view at <code>docs/compare.png</code>.</sub>
 
