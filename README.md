@@ -104,7 +104,7 @@ Done:     photo.jpg | Photo Small x2 | 1920x1080 -> 3840x2160 | 4.37 s | GPU 0 (
 
 ## Compare mode
 
-![Compare mode screenshot](docs/comparemode.png)
+![Compare mode screenshot](docs/comparemode.jpg)
 
 <sub>↑ Put a screenshot of the compare view at <code>docs/compare.png</code>.</sub>
 
