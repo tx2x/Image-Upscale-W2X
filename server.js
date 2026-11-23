@@ -83,6 +83,8 @@ const CATALOG = [
   { id: 'RealESRGANv2-animevideo-xsx4', label: 'RealESRGANv2 AnimeVideo ×4', scale: 4, group: R, size: 1.3, desc: 'Compact anime video model (v2), native 4×.', author: AUTHOR_RE, license: LIC_RE },
 ];
 const CATALOG_BY_ID = new Map(CATALOG.map((c) => [c.id, c]));
+// Recommended models first (stable sort keeps the order above inside each part).
+const CATALOG_ORDERED = [...CATALOG].sort((a, b) => Number(!!b.rec) - Number(!!a.rec));
 const DEFAULT_MODEL = 'Universal-FastV2-W2xEX';
 
 /* ───────────────────────── state ───────────────────────── */
@@ -139,7 +141,7 @@ function listModels() {
     }
     out.push({ id: name, label: known?.label || name, scale, recommended: !!known?.rec, description: known?.desc || 'Custom model.', known: !!known });
   }
-  const order = CATALOG.map((c) => c.id);
+  const order = CATALOG_ORDERED.map((c) => c.id);
   out.sort((a, b) => {
     const ia = order.indexOf(a.id), ib = order.indexOf(b.id);
     return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib) || a.id.localeCompare(b.id);
@@ -275,7 +277,7 @@ async function attachProfile(file, format, icc, name, w, h, alpha) {
 function publicItem(it) {
   return {
     id: it.id, name: it.name, relPath: it.relPath, width: it.width, height: it.height,
-    format: it.format, size: it.size, version: it.version, error: it.error || null, profile: it.profileName || null, profileUsable: !!it.profileUsable,
+    format: it.format, size: it.size, version: it.version, error: it.error || null, errorDetail: it.errorDetail || null, profile: it.profileName || null, profileUsable: !!it.profileUsable,
     results: Object.values(it.results).map((r) => ({
       key: r.key, model: r.model, scale: r.scale, format: r.format, width: r.width, height: r.height,
       size: r.size, name: r.name, ms: r.ms, device: r.device, at: r.at, profile: r.profile,
@@ -369,7 +371,7 @@ function validateParams(p) {
   if (!Number.isInteger(device) || device < 0) throw new Error('Select a Vulkan device first');
   let tile = Number(p.tile) || 0;
   if (tile !== 0 && (tile < 32 || tile > 8192)) tile = 0;
-  return { model: model.id, modelLabel: model.label, native: model.scale, scale, format, device, tile: Math.round(tile), tta: !!p.tta, profile: p.profile === 'srgb' ? 'srgb' : 'keep' };
+  return { model: model.id, modelLabel: model.label, native: model.scale, scale, format, device, tile: Math.round(tile), tta: !!p.tta, profile: p.profile === 'srgb' ? 'srgb' : 'keep', safe: !!p.safe };
 }
 // 'none' = the image has no usable RGB profile, so the setting makes no difference.
 const profileModeFor = (it, wanted) => (it.profileUsable ? wanted : 'none');
@@ -385,7 +387,7 @@ function enqueue(itemIds, rawParams, force) {
     const key = `${params.model}~${params.scale}~${params.format}~${profileMode}`;
     if (jobs.some((j) => j.itemId === id && j.key === key)) continue;
     if (!force && it.results[key]) continue;
-    it.error = null;
+    it.error = null; it.errorDetail = null;
     jobs.push({ id: ++jobSeq, itemId: id, params, key, profileMode, status: 'queued', percent: 0, pass: 1, passes: 1, canceled: false, child: null, startedAt: 0 });
     emitItem(it);
     added++;
@@ -425,8 +427,9 @@ async function pump() {
   } catch (err) {
     if (job.canceled) console.log(`  Canceled: ${what} (after ${fmtSec(Date.now() - job.startedAt)})`);
     else {
-      if (it) it.error = err.message;
+      if (it) { it.error = err.message; it.errorDetail = err.tail ? err.tail.trim().split(/\r?\n/).slice(-12).join('\n').slice(-1500) : null; }
       console.error(`  Failed:   ${what} | ${err.message} (after ${fmtSec(Date.now() - job.startedAt)})`);
+      if (err.tail) console.error('    engine output:\n' + err.tail.trim().split(/\r?\n/).slice(-12).map((l) => '      ' + l).join('\n'));
     }
   } finally {
     const idx = jobs.indexOf(job);
@@ -438,15 +441,22 @@ async function pump() {
   }
 }
 
-function friendlyError(tail, code) {
+// Turns the engine's raw output into a message that names the real cause.
+function analyzeError(tail, code) {
   const t = tail.toLowerCase();
-  if (/vkallocatememory|out of memory|vkqueuesubmit failed|device lost/.test(t)) return 'The GPU ran out of memory. Try a smaller tile size (Advanced) or another device.';
-  if (/invalid gpu device/.test(t)) return 'The selected device is not available. Rescan devices and pick another one.';
-  if (/decode image .* failed/.test(t)) return 'The engine could not decode this image.';
-  if (/open failed|param.*failed|model/.test(t) && /fail/.test(t)) return 'The engine could not load the model files in models/.';
+  const vk = [...t.matchAll(/(vk\w+) failed (-?\d+)/g)].map((m) => ({ fn: m[1], code: Number(m[2]) }));
+  const has = (c) => vk.some((v) => v.code === c);
+  if (/invalid gpu device/.test(t)) return { kind: 'device', message: 'The selected device is not available. Rescan devices and pick another one.' };
+  if (has(-2) || has(-1) || /out of memory/.test(t)) return { kind: 'memory', message: 'The GPU ran out of memory. Try a smaller tile size (Advanced) or another device.' };
+  if (has(-4) || /device lost/.test(t)) return { kind: 'lost', message: 'The GPU driver stopped responding (Vulkan "device lost"). Update the graphics driver, or turn on Compatibility mode in Advanced.' };
+  if (vk.length) return { kind: 'vulkan', message: `Vulkan error ${vk[0].fn} (code ${vk[0].code}). Try Compatibility mode in Advanced, or another device.` };
+  if (/decode image .* failed/.test(t)) return { kind: 'decode', message: 'The engine could not decode this image.' };
+  if (/open failed|param.*failed|model/.test(t) && /fail/.test(t)) return { kind: 'model', message: 'The engine could not load the model files in models/.' };
   const last = tail.trim().split(/\r?\n/).filter(Boolean).slice(-1)[0];
-  return `Engine failed (exit code ${code})${last ? ': ' + last.slice(0, 160) : ''}`;
+  return { kind: 'other', message: `Engine failed (exit code ${code})${last ? ': ' + last.slice(0, 160) : ''}` };
 }
+const RETRYABLE = new Set(['memory', 'lost', 'vulkan']);
+const safeDevices = new Set(); // devices that needed the safe settings once; reused for the rest of the session
 
 function runEngine(args, job, onPercent) {
   return new Promise((resolve, reject) => {
@@ -466,7 +476,9 @@ function runEngine(args, job, onPercent) {
       job.child = null;
       if (job.canceled) return reject(new Error('Canceled'));
       if (code === 0) return resolve(tail);
-      reject(new Error(friendlyError(tail, code)));
+      const a = analyzeError(tail, code);
+      const e = new Error(a.message); e.kind = a.kind; e.tail = tail;
+      reject(e);
     });
   });
 }
@@ -505,17 +517,38 @@ async function runJob(job, it) {
     while (reach < p.scale - 1e-9) { reach *= p.native; passes++; }
     job.passes = passes;
 
+    let safe = p.safe || safeDevices.has(p.device);
     let current = engineInput;
     for (let i = 1; i <= passes; i++) {
       job.pass = i;
       const out = path.join(tmp, `pass${i}.png`);
-      const args = ['-i', current, '-o', out, '-s', String(p.native), '-m', 'models', '-n', p.model, '-g', String(p.device), '-f', 'png'];
-      if (p.tile) args.push('-t', String(p.tile));
-      if (p.tta) args.push('-x');
-      await runEngine(args, job, (pct) => {
-        job.percent = ((i - 1) + pct / 100) / passes * 100;
-        broadcast('progress', { jobId: job.id, itemId: job.itemId, percent: Math.round(job.percent * 10) / 10, pass: i, passes });
-      });
+      let passMax = 0;
+      for (;;) {
+        const args = ['-i', current, '-o', out, '-s', String(p.native), '-m', 'models', '-n', p.model, '-g', String(p.device), '-f', 'png'];
+        if (safe) args.push('-j', '1:1:1', '-t', String(p.tile >= 32 && p.tile < 100 ? p.tile : 100));
+        else if (p.tile) args.push('-t', String(p.tile));
+        if (p.tta) args.push('-x');
+        try {
+          await runEngine(args, job, (pct) => {
+            // Never let the bar go backwards, and keep it below 100% until the file is really finished.
+            passMax = Math.max(passMax, Math.min(pct, 100));
+            job.percent = Math.min(99, ((i - 1) + passMax / 100) / passes * 100);
+            const now = Date.now();
+            if (now - (job.lastEmit || 0) >= 120) {
+              job.lastEmit = now;
+              broadcast('progress', { jobId: job.id, itemId: job.itemId, percent: Math.round(job.percent * 10) / 10, pass: i, passes });
+            }
+          });
+          break;
+        } catch (err) {
+          if (safe || job.canceled || !RETRYABLE.has(err.kind)) throw err;
+          safe = true;
+          safeDevices.add(p.device);
+          console.log(`  Retrying: ${it.name} | engine error (${err.kind}), trying safe settings (1 thread, small tiles) on device ${p.device}`);
+          await fsp.rm(out, { force: true });
+          passMax = 0;
+        }
+      }
       if (!exists(out)) throw new Error('The engine finished but produced no output. The image may be unsupported.');
       if (current !== it.inputPath) await fsp.rm(current, { force: true });
       current = out;
@@ -641,6 +674,18 @@ route('DELETE', /^\/api\/items$/, async (req, res) => {
 });
 route('DELETE', /^\/api\/items\/([a-f0-9]+)$/, async (req, res, m) => { await removeItem(m[1]); send(res, 200, { ok: true }); });
 
+route('DELETE', /^\/api\/items\/([a-f0-9]+)\/result\/([^/]+)$/, async (req, res, m) => {
+  const it = items.get(m[1]);
+  const key = decodeURIComponent(m[2]);
+  const r = it && it.results[key];
+  if (!r) return send(res, 404, { error: 'Not found' });
+  if (r.file.startsWith(OUT_DIR + path.sep)) await fsp.rm(r.file, { force: true });
+  claimedOutputs.delete(r.file);
+  delete it.results[key];
+  emitItem(it);
+  send(res, 200, { ok: true });
+});
+
 function serveFile(req, res, file, mime, download) {
   if (!file || !exists(file)) return send(res, 404, { error: 'Not found' });
   const stat = fs.statSync(file);
@@ -677,7 +722,7 @@ route('POST', /^\/api\/open-output$/, async (req, res) => {
 });
 
 const LOCAL_ADDR = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
-route('GET', /^\/api\/models$/, async (req, res) => send(res, 200, { models: CATALOG.map(modelState) }));
+route('GET', /^\/api\/models$/, async (req, res) => send(res, 200, { models: CATALOG_ORDERED.map(modelState) }));
 route('POST', /^\/api\/models\/download$/, async (req, res) => {
   if (!LOCAL_ADDR.has(req.socket.remoteAddress)) return send(res, 403, { error: 'Models can only be downloaded from the computer that runs the server.' });
   const body = await readJson(req);

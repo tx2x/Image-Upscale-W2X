@@ -16,17 +16,19 @@ Runs on **Windows** and **Linux**, uses your GPU through Vulkan, and never sends
 ## Features
 
 - **Four upscale factors** – ×1.5, **×2 (default)**, ×3 and ×4, whatever the native scale of the model (see [how factors work](#how-factors-work)).
-- **Model manager** – download only the models you want, right from the UI. Recommended ones are marked with `*`, and models you already have are highlighted.
+- **Model manager** – download only the models you want, right from the UI. Recommended models sit at the top with a **Recommended** badge, and models you already have are highlighted in green.
 - **Device picker** that lists every Vulkan device by name (`GPU 0 — NVIDIA GeForce RTX …`, `GPU 1 — AMD …`).
 - **Drag & drop** images or whole folders (sub-folders included), or use the *Choose files* / *Choose folder* buttons.
 - **Clear file list** – each image gets a row with a thumbnail, a shortened file name, resolution, format, file size and embedded color profile.
-- **Process one or all** – upscale a single image, or everything in the list one by one. Queue with progress, cancel any time.
+- **Process one or all** – upscale a single image, or everything in the list one by one. Queue with a progress bar, cancel any time.
+- **Manage your results** – every result shows its format, resolution and file size; download it, compare it, or delete variants you do not need.
 - **[Compare mode](#compare-mode)** – slider or side-by-side, synchronised zoom and pan, the original at stretched *or* native resolution, and any two results against each other.
 - **[Color profile handling](#color-profiles)** – keep the original profile (e.g. Display P3) or convert to sRGB, so results do not look washed out.
 - **Auto / Light / Dark** theme switch.
 - **Output formats** – PNG (lossless), JPEG or WebP.
 - **Everything stays in one folder** – engine, models, fonts, results. After the first setup it works **without internet**.
 - **Private by default** – the server listens on `localhost` only. [Network mode](#network-mode) is one flag away.
+- **Resilient on integrated GPUs** – if the engine crashes, the job is retried automatically with safe settings; a *Compatibility mode* switch is available too. Errors name the real cause and show the engine output.
 - **Timing in the console** – every finished job prints how long it took.
 - **No build step, no framework, no CDN.** Plain Node.js server + vanilla JS front-end.
 
@@ -48,7 +50,7 @@ Runs on **Windows** and **Linux**, uses your GPU through Vulkan, and never sends
 ### Linux (and macOS, best effort)
 
 ```bash
-git clone https://github.com/tx2x/Image-Upscale-W2X.git
+git clone https://github.com/tx2x/Image-Upscale-W2X/Image-Upscale-W2X.git
 cd Image-Upscale-W2X
 ./start.sh
 ```
@@ -74,10 +76,10 @@ npm start              # starts the server
 Image Upscale W2X **does not contain any models** and does not bundle anyone else's weights. Models are downloaded only when you ask for it:
 
 1. Click **Download models…** under the model list (it opens automatically on the very first start).
-2. Press **Download** next to the models you want. Models you already have are highlighted in green.
+2. Press **Download** next to the models you want. The list is flat; recommended models come first, models you already have are highlighted in green.
 3. They are saved into the `models/` folder and appear in the model list immediately.
 
-Models marked with **\*** are the recommended ones. You can also put any other ncnn model (`name.param` + `name.bin`) into `models/` yourself – a `2x` / `4x` in the file name sets its native scale (4× is assumed otherwise).
+The four **Recommended** models (`Universal-FastV2-W2xEX`, `Photo-Small-W2xEX`, `Anime-HQ-W4xEX`, `realesr-general-wdn-x4v3`) are listed first; they also carry a `*` in the model drop-down. You can also put any other ncnn model (`name.param` + `name.bin`) into `models/` yourself – a `2x` / `4x` in the file name sets its native scale (4× is assumed otherwise).
 
 ## Using the tool
 
@@ -85,6 +87,14 @@ Models marked with **\*** are the recommended ones. You can also put any other n
 2. **Choose** a model, a factor, a device and a color-profile mode in the left panel.
 3. Click **Upscale ×2** on a single image, or **Upscale all** to process the whole list.
 4. Click a result chip (or **Compare**) to open [compare mode](#compare-mode). Results are written to the `output/` folder, named `<name>_<model>_x<factor>.<ext>`.
+
+### Managing results
+
+Every upscaled version of an image appears as a chip under its row, for example `Photo Small ×2  PNG · 3840 × 2160 · 8.1 MB`: model, factor, **format**, resolution and **file size** of the new file.
+
+- Click the chip to open it in [compare mode](#compare-mode).
+- The **download** icon saves the file; the **trash** icon deletes that variant from the `output/` folder after a confirmation. This cannot be undone.
+- *Remove* on the file row only takes the image out of the list; the files in `output/` stay.
 
 Existing files in `output/` are never overwritten – a counter is appended instead (`_2`, `_3`, …). Each finished job prints a line like this in the console:
 
@@ -94,7 +104,9 @@ Done:     photo.jpg | Photo Small x2 | 1920x1080 -> 3840x2160 | 4.37 s | GPU 0 (
 
 ## Compare mode
 
-![Compare mode screenshot](docs/comparemode.jpg)
+![Compare mode screenshot](docs/compare.png)
+
+<sub>↑ Put a screenshot of the compare view at <code>docs/compare.png</code>.</sub>
 
 Open it from the **Compare** button of a file, or by clicking one of its result chips.
 
@@ -207,12 +219,13 @@ Models of the [Real-ESRGAN](https://github.com/xinntao/Real-ESRGAN) family by **
 ## Troubleshooting
 
 - **"No Vulkan-capable device was detected"** – update your graphics driver; on Linux install `mesa-vulkan-drivers` (or the NVIDIA driver) and click the rescan button next to the device list.
-- **"The GPU ran out of memory"** – *Advanced → Tile size* → pick a smaller value (e.g. 100 or 200).
+- **"The GPU ran out of memory"** – *Advanced → Tile size* → pick a smaller value (e.g. 100 or 200), or use *Compatibility mode*.
+- **"The GPU driver stopped responding"** (Vulkan *device lost*) – update the graphics driver and use *Compatibility mode*.
 - **CPU processing** – the engine has no native CPU mode. If your system has a *software* Vulkan driver (Mesa `llvmpipe` on Linux), it shows up in the list as `CPU (software)` and works, but it is very slow. Otherwise the CPU entry is shown as unavailable.
+- **A job fails on an integrated GPU (for example AMD Vega in a Ryzen APU)** – the app already retries once with safe settings (one thread, small tiles) and remembers this for the device. You can also tick **Advanced → Compatibility mode** to use them from the start. If it still fails, open *Engine output* under the error message, and update your graphics driver. If the message really is about memory, raise the video memory allocation (UMA Frame Buffer Size) in the BIOS.
 - **A model download fails** – check your internet connection and press *Download* again.
 - **Port already in use** – start with `--port 7843`.
 - **Something else** – read the console window of the server; engine errors appear there.
-- The project intentionally has no build step: edit `server.js` or the files in `public/` and reload.
 
 ## Supported input
 
@@ -226,9 +239,6 @@ Image Upscale W2X itself is released under the [MIT License](LICENSE). It stands
 - [**Real-ESRGAN**](https://github.com/xinntao/Real-ESRGAN) by Xintao Wang and contributors, and [**Waifu2x-Extension-GUI**](https://github.com/AaronFeng753/Waifu2x-Extension-GUI) by Aaron Feng – the origin of the models listed above.
 - [**sharp**](https://sharp.pixelplumbing.com/) (Apache-2.0) and [**adm-zip**](https://github.com/cthackers/adm-zip) (MIT).
 - [**Geist** and **Geist Mono**](https://github.com/vercel/geist-font) fonts (SIL OFL 1.1, see `public/fonts/OFL-Geist.txt`).
+- The project intentionally has no build step: edit `server.js` or the files in `public/` and reload.
 
 The code was written using web version of Claude Sonnet 5.5 😁.
-
-## Contributing
-
-Issues and pull requests are welcome. The project intentionally has no build step: edit `server.js` or the files in `public/` and reload.

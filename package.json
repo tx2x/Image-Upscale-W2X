@@ -1,6 +1,6 @@
 {
   "name": "image-upscale-w2x",
-  "version": "1.0.0",
+  "version": "1.5.0",
   "description": "Local web UI for batch image upscaling with Real-ESRGAN (ncnn-vulkan) and the W2xEX models. Works offline on Windows and Linux.",
   "license": "MIT",
   "private": true,

@@ -264,3 +264,18 @@ dialog::backdrop { background: rgba(5, 8, 10, .72); backdrop-filter: blur(3px); 
 .mact .small-note { font-size: 12px; color: var(--ink-2); text-align: center; font-family: var(--mono); }
 .mact .err-note { font-size: 12px; color: var(--danger); }
 @media (max-width: 640px) { .mrow { grid-template-columns: 1fr; } }
+
+.errd { margin-top: 4px; color: var(--ink-2); }
+.errd summary { cursor: pointer; font-size: 12px; }
+.errd pre { margin: 6px 0 0; padding: 8px 10px; max-height: 160px; overflow: auto; border-radius: var(--r-sm); background: var(--panel-2); border: 1px solid var(--line); font: 11.5px/1.45 var(--mono); white-space: pre-wrap; word-break: break-all; color: var(--ink); }
+
+/* result chips: delete button, recommended tag */
+.chip-del { display: grid; place-items: center; width: 28px; border: 0; border-left: 1px solid var(--line); background: transparent; color: var(--ink-3); padding: 0; }
+.chip-del:hover { background: var(--danger-soft); color: var(--danger); }
+.chip-del svg { width: 14px; height: 14px; }
+.chip:has(.chip-del:hover) { border-color: var(--danger); }
+.stext { display: block; }
+.status .bar { margin-top: 4px; }
+.status .bar > i { transition: width .15s linear; }
+.rec { font-size: 11px; font-weight: 650; padding: 1px 8px; border-radius: 999px; background: var(--accent); color: var(--accent-ink); letter-spacing: .01em; }
+.mdl-body { padding-top: 14px; }

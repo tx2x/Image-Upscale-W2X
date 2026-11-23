@@ -39,13 +39,13 @@
     items: new Map(),
     jobs: [],
     uploads: { total: 0, done: 0 },
-    settings: { model: '', scale: 2, device: '', format: 'png', tile: '0', tta: false, profile: 'keep' },
+    settings: { model: '', scale: 2, device: '', format: 'png', tile: '0', tta: false, safe: false, profile: 'keep' },
     catalog: [],
   };
   const el = {
     model: $('#model'), modelDesc: $('#modelDesc'), scaleSeg: $('#scaleSeg'), scaleHint: $('#scaleHint'),
     profile: $('#profile'), profileHint: $('#profileHint'), manageModels: $('#manageModels'),
-    device: $('#device'), deviceHint: $('#deviceHint'), rescan: $('#rescan'), format: $('#format'), tile: $('#tile'), tta: $('#tta'),
+    device: $('#device'), deviceHint: $('#deviceHint'), rescan: $('#rescan'), format: $('#format'), tile: $('#tile'), tta: $('#tta'), safe: $('#safe'),
     warn: $('#warn'), outDir: $('#outDir'), openOut: $('#openOut'), drop: $('#drop'), toolbar: $('#toolbar'), count: $('#count'),
     list: $('#list'), runAll: $('#runAll'), stopAll: $('#stopAll'), clearAll: $('#clearAll'), netPill: $('#netPill'),
   };
@@ -111,6 +111,7 @@
     el.format.value = S.settings.format;
     el.tile.value = S.settings.tile;
     el.tta.checked = !!S.settings.tta;
+    el.safe.checked = !!S.settings.safe;
     if (!['keep', 'srgb'].includes(S.settings.profile)) S.settings.profile = 'keep';
     el.profile.value = S.settings.profile;
     refreshSettingsView();
@@ -181,6 +182,7 @@
   el.device.addEventListener('change', () => { S.settings.device = el.device.value; saveSettings(); renderDevices(); refreshSettingsView(); });
   el.format.addEventListener('change', () => { S.settings.format = el.format.value; saveSettings(); });
   el.tile.addEventListener('change', () => { S.settings.tile = el.tile.value; saveSettings(); });
+  el.safe.addEventListener('change', () => { S.settings.safe = el.safe.checked; saveSettings(); });
   el.tta.addEventListener('change', () => { S.settings.tta = el.tta.checked; saveSettings(); });
   el.rescan.addEventListener('click', async () => {
     el.rescan.disabled = true;
@@ -289,8 +291,9 @@
     const results = [...it.results].sort((a, b) => a.at - b.at).map((r) => {
       const tip = `${r.name} · ${fmtBytes(r.size)} · ${(r.ms / 1000).toFixed(1)} s on ${r.device}`;
       return `<span class="chip" title="${esc(tip)}">
-        <button class="chip-main" data-act="compare" data-key="${esc(r.key)}"><i class="dot"></i>${esc(modelLabel(r.model))} ${fmtScale(r.scale)}${r.profile === 'srgb' ? '<span class="srgb">sRGB</span>' : ''}<span class="dim">${fmtDim(r.width, r.height)}</span></button>
+        <button class="chip-main" data-act="compare" data-key="${esc(r.key)}"><i class="dot"></i>${esc(modelLabel(r.model))} ${fmtScale(r.scale)}${r.profile === 'srgb' ? '<span class="srgb">sRGB</span>' : ''}<span class="dim">${esc(r.format.toUpperCase())} · ${fmtDim(r.width, r.height)} · ${fmtBytes(r.size)}</span></button>
         <a class="chip-dl" href="/api/items/${it.id}/result/${encodeURIComponent(r.key)}?download=1" download title="Download ${esc(r.name)}" aria-label="Download result">${ICON.download}</a>
+        <button class="chip-del" data-act="delete-result" data-key="${esc(r.key)}" title="Delete this result file" aria-label="Delete this result">${ICON.trash}</button>
       </span>`;
     }).join('');
     const title = it.relPath || it.name;
@@ -300,7 +303,7 @@
         <div class="name" title="${esc(title)}">${esc(shorten(it.name))}</div>
         <div class="meta"><span class="tech">${fmtDim(it.width, it.height)}</span><span class="tech">${esc(it.format)}</span><span class="tech">${fmtBytes(it.size)}</span>${it.profile ? `<span class="tech icc" title="Embedded color profile: ${esc(it.profile)}">ICC: ${esc(it.profile)}</span>` : ''}</div>
         <div class="results">${results}</div>
-        <div class="status"></div>
+        <div class="status" hidden><span class="stext"></span><div class="bar" hidden><i></i></div><div class="serr"></div></div>
       </div>
       <div class="actions">
         <button class="btn tone-green" data-act="run"></button>
@@ -314,20 +317,34 @@
     if (!li || !it) return;
     const job = jobFor(id);
     const status = li.querySelector('.status'), run = li.querySelector('[data-act="run"]');
-    li.classList.toggle('busy', !!job && job.status === 'running');
-    status.classList.remove('err');
-    if (job && job.status === 'running') {
+    const stext = status.querySelector('.stext'), bar = status.querySelector('.bar'), fill = bar.firstElementChild, serr = status.querySelector('.serr');
+    const running = !!job && job.status === 'running';
+    li.classList.toggle('busy', running);
+    status.classList.toggle('err', !job && !!it.error);
+    status.hidden = !job && !it.error;
+    // The progress bar element is created once and only its width changes (no re-creation on every update).
+    bar.hidden = !running;
+    if (running) {
       const pass = job.passes > 1 ? ` · pass ${job.pass}/${job.passes}` : '';
-      status.innerHTML = `Processing with ${esc(modelLabel(job.model))} ${fmtScale(job.scale)}${pass} · ${Math.round(job.percent)}%<div class="bar"><i style="width:${job.percent}%"></i></div>`;
-    } else if (job) {
-      status.textContent = 'Waiting in queue…';
-    } else if (it.error) {
-      status.textContent = it.error; status.classList.add('err');
-    } else status.textContent = '';
+      stext.textContent = `Processing with ${modelLabel(job.model)} ${fmtScale(job.scale)}${pass} · ${Math.round(job.percent)}%`;
+      fill.style.width = job.percent + '%';
+    } else if (job) stext.textContent = 'Waiting in queue…';
+    else stext.textContent = '';
+    if (!job && it.error) {
+      const sig = it.error + '|' + (it.errorDetail || '');
+      if (serr.dataset.sig !== sig) {
+        serr.dataset.sig = sig;
+        serr.innerHTML = esc(it.error) + (it.errorDetail ? `<details class="errd"><summary>Engine output</summary><pre>${esc(it.errorDetail)}</pre></details>` : '');
+      }
+    } else if (serr.dataset.sig) { serr.dataset.sig = ''; serr.innerHTML = ''; }
     run.classList.toggle('tone-amber', !!job);
     run.classList.toggle('tone-green', !job);
-    if (job) { run.innerHTML = `${ICON.stop}<span>Cancel</span>`; run.dataset.mode = 'cancel'; run.disabled = false; }
-    else { run.innerHTML = `${ICON.play}<span>Upscale ${fmtScale(S.settings.scale)}</span>`; run.dataset.mode = 'run'; run.disabled = !canProcess(); }
+    const mode = job ? 'cancel' : 'run';
+    if (run.dataset.mode !== mode || run.dataset.scale !== String(S.settings.scale)) {
+      run.dataset.mode = mode; run.dataset.scale = String(S.settings.scale);
+      run.innerHTML = job ? `${ICON.stop}<span>Cancel</span>` : `${ICON.play}<span>Upscale ${fmtScale(S.settings.scale)}</span>`;
+    }
+    run.disabled = job ? false : !canProcess();
   }
   function updateAllStatuses() { for (const id of S.items.keys()) updateStatus(id); }
 
@@ -349,7 +366,7 @@
     if (!canProcess()) { toast('Pick a model and a device first.', 'error'); return; }
     try {
       const s = S.settings;
-      const r = await api('/api/process', { method: 'POST', json: { ids, force, model: s.model, scale: s.scale, device: Number(s.device), format: s.format, tile: Number(s.tile), tta: s.tta, profile: s.profile } });
+      const r = await api('/api/process', { method: 'POST', json: { ids, force, model: s.model, scale: s.scale, device: Number(s.device), format: s.format, tile: Number(s.tile), tta: s.tta, profile: s.profile, safe: s.safe } });
       if (!r.queued) toast('Nothing to do – these images already have this result. Change a setting or process one image on its own to redo it.');
       else if (ids.length > 1) toast(`Queued ${r.queued} of ${ids.length} image(s)`);
     } catch (err) { toast(err.message, 'error'); }
@@ -364,6 +381,12 @@
       if (b.dataset.mode === 'cancel') api('/api/cancel', { method: 'POST', json: { itemId: id } });
       else startJobs([id], true);
     } else if (act === 'compare') openCompare(id, b.dataset.key);
+    else if (act === 'delete-result') {
+      const r = S.items.get(id).results.find((x) => x.key === b.dataset.key);
+      if (!r) return;
+      if (!confirm(`Delete this result from the output folder?\n\n${r.name}\n${r.format.toUpperCase()} · ${fmtDim(r.width, r.height)} · ${fmtBytes(r.size)}\n\nThis cannot be undone.`)) return;
+      api(`/api/items/${id}/result/${encodeURIComponent(r.key)}`, { method: 'DELETE' }).then(() => toast('Result deleted.')).catch((err) => toast(err.message, 'error'));
+    }
     else if (act === 'remove') {
       const had = S.items.get(id).results.length;
       api(`/api/items/${id}`, { method: 'DELETE' }).then(() => { if (had) toast('Removed from the list. Result files stay in the output folder.'); });
@@ -410,6 +433,7 @@
   function refreshCompareOptions(reset) {
     const it = S.items.get(cmp.id);
     if (!it) return;
+    if (!it.results.length) { dlg.close(); return; }
     const list = sourcesOf(it);
     if (!list.some((s) => s.key === cmp.a)) cmp.a = 'orig';
     if (!list.some((s) => s.key === cmp.b)) cmp.b = list[list.length - 1].key;
@@ -558,7 +582,7 @@
   const fmtSize = (mb) => (mb < 1 ? Math.max(1, Math.round(mb * 1024)) + ' KB' : mb < 10 ? mb.toFixed(1) + ' MB' : Math.round(mb) + ' MB');
 
   function modelRowHTML(m) {
-    const name = (m.recommended ? '* ' : '') + m.label;
+    const name = m.label;
     let act;
     if (m.installed) act = '<div class="badge-ok"><svg viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></svg>Downloaded</div>';
     else if (m.state === 'downloading') {
@@ -570,7 +594,7 @@
     }
     return `<div class="mrow ${m.installed ? 'ok' : ''} ${m.state === 'error' ? 'err' : ''}" data-id="${esc(m.id)}">
       <div>
-        <div class="mname"><span>${esc(name)}</span><span class="tech">native ${m.scale}×</span><span class="mid">${esc(m.id)}</span></div>
+        <div class="mname"><span>${esc(name)}</span>${m.recommended ? '<span class="rec">Recommended</span>' : ''}<span class="tech">native ${m.scale}×</span><span class="mid">${esc(m.id)}</span></div>
         <div class="mdesc">${esc(m.description)}</div>
         <div class="mlic"><b>Author:</b> ${esc(m.author)}<br><b>License:</b> ${esc(m.license)}</div>
       </div>
@@ -578,9 +602,7 @@
     </div>`;
   }
   function renderCatalog() {
-    const groups = [...new Set(S.catalog.map((m) => m.group))];
-    mdlList.innerHTML = groups.map((g) =>
-      `<div class="mdl-group">${esc(g)}</div>` + S.catalog.filter((m) => m.group === g).map(modelRowHTML).join('')).join('');
+    mdlList.innerHTML = S.catalog.map(modelRowHTML).join('');
   }
   async function loadCatalog() {
     try { S.catalog = (await api('/api/models')).models; renderCatalog(); } catch (err) { toast(err.message, 'error'); }
