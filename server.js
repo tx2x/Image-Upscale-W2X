@@ -69,17 +69,17 @@ const W = 'W2xEX series', R = 'Real-ESRGAN family';
 const CATALOG = [
   { id: 'Universal-FastV2-W2xEX', label: 'Universal Fast V2', scale: 2, rec: true, group: W, size: 2.5, desc: 'Fast general-purpose model. Best first choice for mixed content.', author: AUTHOR_W2X, license: LIC_NONE },
   { id: 'Photo-Small-W2xEX', label: 'Photo Small', scale: 2, rec: true, group: W, size: 2.5, desc: 'Fast photo model: detail, clarity and compression-artifact removal.', author: AUTHOR_W2X, license: LIC_NONE },
-  { id: 'Anime-HQ-W4xEX', label: 'Anime HQ', scale: 4, rec: true, group: W, size: 67, desc: 'High-quality anime and 2D art. Native 4×, slow.', author: AUTHOR_W2X, license: LIC_NONE },
-  { id: 'Photo-HQ-W4xEX', label: 'Photo HQ', scale: 4, group: W, size: 67, desc: 'High-quality photos with strong denoising. Native 4×, slow.', author: AUTHOR_W2X, license: LIC_NONE },
+  { id: 'Anime-HQ-W4xEX', label: 'Anime HQ', scale: 4, heavy: true, rec: true, group: W, size: 67, desc: 'High-quality anime and 2D art. Native 4×, slow.', author: AUTHOR_W2X, license: LIC_NONE },
+  { id: 'Photo-HQ-W4xEX', label: 'Photo HQ', scale: 4, heavy: true, group: W, size: 67, desc: 'High-quality photos with strong denoising. Native 4×, slow.', author: AUTHOR_W2X, license: LIC_NONE },
   { id: 'Omni-Smallv2-W2xEX', label: 'Omni Small V2', scale: 2, group: W, size: 1.3, desc: 'General-purpose, small and quick.', author: AUTHOR_W2X, license: LIC_NONE },
   { id: 'Omni-TurboV1.5-W2xEX', label: 'Omni Turbo V1.5', scale: 2, group: W, size: 0.7, desc: 'Fast general-purpose model.', author: AUTHOR_W2X, license: LIC_NONE },
   { id: 'Omni-MiniV2-W2xEX', label: 'Omni Mini V2', scale: 2, group: W, size: 0.2, desc: 'Lightweight general-purpose model, extremely fast, lowest quality.', author: AUTHOR_W2X, license: LIC_NONE },
   { id: 'AnimeVideo-MiniV1.8-W2xEX', label: 'AnimeVideo Mini V1.8', scale: 2, group: W, size: 0.1, desc: 'Very fast anime model made for video.', author: AUTHOR_W2X, license: LIC_NONE },
   { id: 'realesr-general-wdn-x4v3', label: 'General WDN v3', scale: 4, group: R, size: 2.5, desc: 'General-purpose with extra denoising. Native 4×.', author: AUTHOR_RE, license: LIC_RE },
   { id: 'realesr-general-x4v3', label: 'General v3', scale: 4, group: R, size: 2.5, desc: 'General-purpose, keeps more texture than the WDN variant. Native 4×.', author: AUTHOR_RE, license: LIC_RE },
-  { id: 'realesrgan-x4plus', label: 'x4plus', scale: 4, group: R, size: 33.5, desc: 'Classic general-purpose image model. Native 4×, slow.', author: AUTHOR_RE, license: LIC_RE },
+  { id: 'realesrgan-x4plus', label: 'x4plus', scale: 4, heavy: true, group: R, size: 33.5, desc: 'Classic general-purpose image model. Native 4×, slow.', author: AUTHOR_RE, license: LIC_RE },
   { id: 'realesrgan-x4plus-anime', label: 'x4plus Anime', scale: 4, group: R, size: 9, desc: 'Anime and illustration model. Native 4×.', author: AUTHOR_RE, license: LIC_RE },
-  { id: 'Photo-Conservative-x4', label: 'Photo Conservative', scale: 4, group: R, size: 33.5, desc: 'Conservative photo upscaling that changes less. Native 4×, slow.', author: 'Introduced in Waifu2x-Extension-GUI (Aaron Feng). Upstream authorship not independently established.', license: LIC_NONE },
+  { id: 'Photo-Conservative-x4', label: 'Photo Conservative', scale: 4, heavy: true, group: R, size: 33.5, desc: 'Conservative photo upscaling that changes less. Native 4×, slow.', author: 'Introduced in Waifu2x-Extension-GUI (Aaron Feng). Upstream authorship not independently established.', license: LIC_NONE },
   { id: 'realesr-animevideov3-x2', label: 'AnimeVideo v3 ×2', scale: 2, group: R, size: 1.3, desc: 'Compact anime video model, native 2×.', author: AUTHOR_RE, license: LIC_RE },
   { id: 'realesr-animevideov3-x3', label: 'AnimeVideo v3 ×3', scale: 3, group: R, size: 1.3, desc: 'Compact anime video model, native 3×.', author: AUTHOR_RE, license: LIC_RE },
   { id: 'realesr-animevideov3-x4', label: 'AnimeVideo v3 ×4', scale: 4, group: R, size: 1.3, desc: 'Compact anime video model, native 4×.', author: AUTHOR_RE, license: LIC_RE },
@@ -143,7 +143,7 @@ function listModels() {
       const m = name.match(/[Ww]([234])x/) || name.match(/[xX]([234])(?![0-9])/) || name.match(/([234])[xX]/);
       scale = m ? Number(m[1]) : 4;
     }
-    out.push({ id: name, label: known?.label || name, scale, recommended: !!known?.rec, description: known?.desc || 'Custom model.', known: !!known });
+    out.push({ id: name, label: known?.label || name, scale, recommended: !!known?.rec, heavy: !!known?.heavy, description: known?.desc || 'Custom model.', known: !!known });
   }
   const order = CATALOG_ORDERED.map((c) => c.id);
   out.sort((a, b) => {
@@ -447,8 +447,30 @@ function analyzeError(tail, code) {
   const last = tail.trim().split(/\r?\n/).filter(Boolean).slice(-1)[0];
   return { kind: 'other', message: `Engine failed (exit code ${code})${last ? ': ' + last.slice(0, 160) : ''}` };
 }
-const RETRYABLE = new Set(['memory', 'lost', 'vulkan']);
-const safeDevices = new Set(); // devices that needed the safe settings once; reused for the rest of the session
+const RETRYABLE = new Set(['memory', 'lost', 'vulkan', 'blank']);
+
+// Some drivers (seen on Intel UHD with large tiles) finish "successfully" but write a black picture. Detect it.
+async function looksBlank(outFile, inputFile) {
+  try {
+    const small = (f) => sharp(f, { limitInputPixels: false }).resize(48, 48, { fit: 'inside' }).removeAlpha().stats();
+    const [o, i] = await Promise.all([small(outFile), small(inputFile)]);
+    const outMax = Math.max(...o.channels.map((c) => c.max));
+    const inMean = i.channels.reduce((a, c) => a + c.mean, 0) / i.channels.length;
+    return outMax <= 2 && inMean > 8;
+  } catch { return false; }
+}
+
+// Memory errors that survive the safe settings mean the model itself does not fit: say so and offer ways out.
+function modelTooBigMessage(p) {
+  const devs = deviceCache || [];
+  const dev = devs.find((d) => d.id === p.device);
+  const others = devs.filter((d) => d.id !== p.device && d.type === 'gpu');
+  const alt = others.find((d) => d.discrete) || others[0];
+  const integrated = dev && dev.type === 'gpu' && !dev.discrete;
+  return `${p.modelLabel} needs more video memory than ${dev ? dev.name : 'this device'} can provide. Choose a lighter model (for example Photo Small or Universal Fast V2)` +
+    (alt ? `, or use ${alt.name}` : '') + (integrated ? ', or raise the video memory share of the integrated graphics (UMA Frame Buffer Size) in the BIOS' : '') + '.';
+}
+const safeDevices = new Map(); // device id -> tile size that worked in safe mode; reused for the rest of the session
 
 function runEngine(args, job, onPercent) {
   return new Promise((resolve, reject) => {
@@ -542,7 +564,11 @@ async function runJob(job, it) {
     while (reach < p.scale - 1e-9) { reach *= p.native; passes++; }
     job.passes = passes;
 
+    const devInfo = (deviceCache || []).find((d) => d.id === p.device);
+    const integrated = !!devInfo && devInfo.type === 'gpu' && !devInfo.discrete;
     let safe = p.safe || safeDevices.has(p.device);
+    // Safe mode starts at tile 100 (or the user's smaller tile) and steps down to 64, then 32, when video memory runs out.
+    let safeTile = safeDevices.get(p.device) || (p.tile >= 32 && p.tile < 100 ? p.tile : 100);
     let current = engineInput;
     for (let i = 1; i <= passes; i++) {
       job.pass = i;
@@ -550,8 +576,9 @@ async function runJob(job, it) {
       let passMax = 0;
       for (;;) {
         const args = ['-i', current, '-o', out, '-s', String(p.native), '-m', 'models', '-n', p.model, '-g', String(p.device), '-f', 'png'];
-        if (safe) args.push('-j', '1:1:1', '-t', String(p.tile >= 32 && p.tile < 100 ? p.tile : 100));
+        if (safe) args.push('-j', '1:1:1', '-t', String(safeTile));
         else if (p.tile) args.push('-t', String(p.tile));
+        else if (integrated) args.push('-t', '100'); // integrated GPUs share system memory; the automatic tile size is too big for them
         if (p.tta) args.push('-x');
         try {
           await runEngine(args, job, (pct) => {
@@ -564,11 +591,26 @@ async function runJob(job, it) {
               broadcast('progress', { jobId: job.id, itemId: job.itemId, percent: Math.round(job.percent * 10) / 10, pass: i, passes });
             }
           });
+          if (exists(out) && await looksBlank(out, current)) {
+            const e = new Error('The engine produced a black image on this device (a driver problem). Turn on Compatibility mode or use another device.');
+            e.kind = 'blank';
+            throw e;
+          }
+          if (safe) safeDevices.set(p.device, safeTile);
           break;
         } catch (err) {
+          if (safe && err.kind === 'memory' && safeTile > 32 && !job.canceled) {
+            safeTile = safeTile > 64 ? 64 : 32;
+            console.log(`  Retrying: ${it.name} | out of video memory, trying tile size ${safeTile} on device ${p.device}`);
+            await fsp.rm(out, { force: true });
+            passMax = 0;
+            continue;
+          }
+          if (safe && err.kind === 'memory' && !job.canceled) err.message = modelTooBigMessage(p);
+          if (safe && err.kind === 'blank' && !job.canceled) err.message = 'The engine still produced a black image on this device, even with safe settings. Update the graphics driver or use another device.';
           if (safe || job.canceled || !RETRYABLE.has(err.kind)) throw err;
           safe = true;
-          safeDevices.add(p.device);
+          safeDevices.set(p.device, safeTile);
           console.log(`  Retrying: ${it.name} | engine error (${err.kind}), trying safe settings (1 thread, small tiles) on device ${p.device}`);
           await fsp.rm(out, { force: true });
           passMax = 0;
@@ -659,7 +701,7 @@ function modelState(c) {
   const installed = listModels().some((m) => m.id === c.id);
   const d = downloads.get(c.id);
   return {
-    id: c.id, label: c.label, scale: c.scale, recommended: !!c.rec, group: c.group, description: c.desc,
+    id: c.id, label: c.label, scale: c.scale, recommended: !!c.rec, heavy: !!c.heavy, group: c.group, description: c.desc,
     author: c.author, license: c.license, sizeMB: c.size, installed,
     state: d ? d.state : installed ? 'installed' : 'idle', received: d ? d.received : 0, total: d ? d.total : 0, error: d ? d.error : null,
   };

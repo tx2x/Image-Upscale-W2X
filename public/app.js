@@ -156,7 +156,9 @@
   function refreshSettingsView() {
     el.scaleSeg.querySelectorAll('button').forEach((b) => b.setAttribute('aria-checked', String(Number(b.dataset.scale) === Number(S.settings.scale))));
     const m = modelById(S.settings.model);
-    el.modelDesc.textContent = m ? m.description : '';
+    const dev = S.info.devices.find((d) => String(d.id) === String(S.settings.device));
+    const heavyNote = m && m.heavy && dev && !dev.discrete ? ' Note: this is a large model and may not fit into the shared memory of integrated graphics. Photo Small or Universal Fast V2 are lighter.' : '';
+    el.modelDesc.textContent = (m ? m.description : '') + heavyNote;
     el.scaleHint.innerHTML = scaleHint();
     el.profileHint.textContent = S.settings.profile === 'srgb'
       ? 'Colors are converted to sRGB before upscaling and no profile is embedded. Safest for apps that ignore profiles.'
@@ -655,7 +657,7 @@
     }
     return `<div class="mrow ${m.installed ? 'ok' : ''} ${m.state === 'error' ? 'err' : ''}" data-id="${esc(m.id)}">
       <div>
-        <div class="mname"><span>${esc(name)}</span>${m.recommended ? '<span class="rec">Recommended</span>' : ''}<span class="tech">native ${m.scale}×</span><span class="mid">${esc(m.id)}</span></div>
+        <div class="mname"><span>${esc(name)}</span>${m.recommended ? '<span class="rec">Recommended</span>' : ''}<span class="tech">native ${m.scale}×</span>${m.heavy ? '<span class="tech" title="Large model: needs about 1 GB of video memory">heavy</span>' : ''}<span class="mid">${esc(m.id)}</span></div>
         <div class="mdesc">${esc(m.description)}</div>
         <div class="mlic"><b>Author:</b> ${esc(m.author)}<br><b>License:</b> ${esc(m.license)}</div>
       </div>

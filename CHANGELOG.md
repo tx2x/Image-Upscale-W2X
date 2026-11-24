@@ -3,6 +3,22 @@
 All notable changes to **Image Upscale W2X** are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses [Semantic Versioning](https://semver.org/).
 
+## [1.6.2] - 2026-11-25
+
+### Added
+- Tile sizes **32** and **64** in *Advanced → Tile size*.
+- **Automatic tile step-down**: when video memory runs out even in safe mode, the engine is retried with tile 64 and then 32 before giving up. The tile size that worked is remembered per device for the session. This helps when the models fit into video memory but the working buffers of a larger tile do not (typical for integrated GPUs with a small BIOS memory allocation).
+
+## [1.6.1] - 2026-11-25
+
+### Fixed
+- **Black output on integrated GPUs** (seen on Intel UHD 750): the engine finished "successfully" but wrote a black picture, so nothing was retried. Results are now checked, and a black picture triggers the automatic retry with safe settings.
+- **Misleading advice when a large model does not fit into video memory** (seen with Anime HQ on the AMD Vega graphics of a Ryzen 5700G). A smaller tile cannot help there, so once the safe settings also fail, the message now names the cause and the options: a lighter model, another device (named), or the BIOS video memory share.
+
+### Changed
+- On integrated GPUs (any GPU that is not recognized as a discrete card) the automatic tile size is replaced by a tile size of 100, which avoids the failures above without needing a retry.
+- Large models are marked **heavy** in the model manager, and the settings panel warns when one is selected together with an integrated GPU.
+
 ## [1.6.0] - 2026-11-24
 
 ### Added
