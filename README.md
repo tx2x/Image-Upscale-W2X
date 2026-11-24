@@ -7,7 +7,7 @@
 Drop in a folder, pick a model and a factor, and compare the result against the original with a slider.
 Runs on **Windows** and **Linux**, uses your GPU through Vulkan, and never sends a single image over the internet.
 
-![Image Upscale W2X screenshot](docs/screenshot-dark.png)
+![Image Upscale W2X screenshot](docs/screenshotdark.png)
 
 </div>
 
@@ -25,9 +25,10 @@ Runs on **Windows** and **Linux**, uses your GPU through Vulkan, and never sends
 - **[Compare mode](#compare-mode)** – slider or side-by-side, synchronised zoom and pan, the original at stretched *or* native resolution, and any two results against each other.
 - **[Color profile handling](#color-profiles)** – keep the original profile (e.g. Display P3) or convert to sRGB, so results do not look washed out.
 - **Auto / Light / Dark** theme switch.
-- **Output formats** – PNG (lossless), JPEG or WebP.
+- **Output formats** – PNG (optimized with **OxiPNG**), JPEG, WebP, **AVIF** and **JPEG XL**, with an option to keep or drop **metadata** (EXIF, XMP). See [output formats](#output-formats-and-metadata).
 - **Everything stays in one folder** – engine, models, fonts, results. After the first setup it works **without internet**.
 - **Private by default** – the server listens on `localhost` only. [Network mode](#network-mode) is one flag away.
+- **Never looks frozen** – while a file is being saved (PNG optimization, AVIF or JPEG XL encoding can take a while) the row shows an animated bar, the current step and a running timer.
 - **Resilient on integrated GPUs** – if the engine crashes, the job is retried automatically with safe settings; a *Compatibility mode* switch is available too. Errors name the real cause and show the engine output.
 - **Timing in the console** – every finished job prints how long it took.
 - **No build step, no framework, no CDN.** Plain Node.js server + vanilla JS front-end.
@@ -40,7 +41,7 @@ Runs on **Windows** and **Linux**, uses your GPU through Vulkan, and never sends
 |---|---|
 | **Node.js** | 18 or newer – <https://nodejs.org/> |
 | **Graphics driver with Vulkan** | Windows: any recent NVIDIA / AMD / Intel driver. Linux: your vendor's driver, or `mesa-vulkan-drivers` |
-| **Internet** | only to fetch the engine on the first start (~3 MB) and for each model you choose to download |
+| **Internet** | only to fetch the engine and the optional OxiPNG / JPEG XL encoder on the first start, and for each model you choose to download |
 
 ### Windows
 
@@ -50,12 +51,12 @@ Runs on **Windows** and **Linux**, uses your GPU through Vulkan, and never sends
 ### Linux (and macOS, best effort)
 
 ```bash
-git clone https://github.com/tx2x/Image-Upscale-W2X/Image-Upscale-W2X.git
+git clone https://github.com/tx2x/Image-Upscale-W2X.git
 cd Image-Upscale-W2X
 ./start.sh
 ```
 
-On the first run the launcher installs the dependencies and downloads the engine, then opens
+On the first run the launcher installs the dependencies and downloads the engine (plus OxiPNG and the JPEG XL encoder), then opens
 <http://localhost:7842> in your browser. **No models are downloaded automatically** – the app asks you to pick some (see below).
 
 > **Linux packages** – on Debian/Ubuntu: `sudo apt install libvulkan1 mesa-vulkan-drivers vulkan-tools`
@@ -65,11 +66,11 @@ On the first run the launcher installs the dependencies and downloads the engine
 
 ```bash
 npm install            # sharp + adm-zip
-npm run setup          # downloads the engine into bin/ (once)
+npm run setup          # downloads the engine, OxiPNG and the JPEG XL encoder into bin/ (once)
 npm start              # starts the server
 ```
 
-`npm run setup -- --force` re-downloads the engine.
+`npm run setup -- --force` downloads everything again, `--skip-tools` fetches the engine only. OxiPNG and the JPEG XL encoder can also be installed later from the web interface (see below).
 
 ## Getting models
 
@@ -79,12 +80,12 @@ Image Upscale W2X **does not contain any models** and does not bundle anyone els
 2. Press **Download** next to the models you want. The list is flat; recommended models come first, models you already have are highlighted in green.
 3. They are saved into the `models/` folder and appear in the model list immediately.
 
-The four **Recommended** models (`Universal-FastV2-W2xEX`, `Photo-Small-W2xEX`, `Anime-HQ-W4xEX`, `realesr-general-wdn-x4v3`) are listed first; they also carry a `*` in the model drop-down. You can also put any other ncnn model (`name.param` + `name.bin`) into `models/` yourself – a `2x` / `4x` in the file name sets its native scale (4× is assumed otherwise).
+The three **Recommended** models (`Universal-FastV2-W2xEX`, `Photo-Small-W2xEX`, `Anime-HQ-W4xEX`) are listed first; they also carry a `*` in the model drop-down. You can also put any other ncnn model (`name.param` + `name.bin`) into `models/` yourself – a `2x` / `4x` in the file name sets its native scale (4× is assumed otherwise).
 
 ## Using the tool
 
 1. **Add images** – drag files or folders onto the window, or use the buttons.
-2. **Choose** a model, a factor, a device and a color-profile mode in the left panel.
+2. **Choose** a model, a factor, a device, an output format (and whether to keep metadata) and a color-profile mode in the left panel.
 3. Click **Upscale ×2** on a single image, or **Upscale all** to process the whole list.
 4. Click a result chip (or **Compare**) to open [compare mode](#compare-mode). Results are written to the `output/` folder, named `<name>_<model>_x<factor>.<ext>`.
 
@@ -104,7 +105,7 @@ Done:     photo.jpg | Photo Small x2 | 1920x1080 -> 3840x2160 | 4.37 s | GPU 0 (
 
 ## Compare mode
 
-![Compare mode screenshot](docs/comparemode.jpg)
+![Compare mode screenshot](docs/compare.png)
 
 <sub>↑ Put a screenshot of the compare view at <code>docs/compare.png</code>.</sub>
 
@@ -118,6 +119,22 @@ Open it from the **Compare** button of a file, or by clicking one of its result 
 - **Info bar** – resolution and file size of both images, and whether one is stretched.
 
 Keyboard: `+` `-` zoom · `0` fit · `1` actual size · `Esc` close · arrow keys on the slider handle move the divider.
+
+## Output formats and metadata
+
+Choose the format in **Output format** in the left panel; results are written to `output/`.
+
+| Format | Quality | Notes |
+|---|---|---|
+| **PNG** | lossless | Optimized with [OxiPNG](https://github.com/oxipng/oxipng). *Advanced → PNG optimization* picks the level: Fast, Balanced (default) or Maximum. |
+| **JPEG** | 95 | No transparency (flattened on white). Up to 65 535 px per side. |
+| **WebP** | 95 | Up to 16 383 px per side. |
+| **AVIF** | 80 | Slow for large images. |
+| **JPEG XL** | 90 | Needs the `cjxl` encoder. Slow for large images. Not every browser or app opens JPEG XL yet; the compare viewer shows a lossless preview instead. |
+
+**Keep metadata** (on by default) copies the EXIF and XMP data of the original into the result in every format, with the orientation already applied. Turn it off to drop camera, location and other personal data. The color profile is separate: it follows the [Color profile](#color-profiles) setting either way.
+
+**Optional helpers.** OxiPNG and the JPEG XL encoder (`cjxl` from [libjxl](https://github.com/libjxl/libjxl)) are downloaded into `bin/` by the first-run setup. If they are missing, for example after an upgrade, the app offers an **Install** button next to the format you selected. Without OxiPNG, PNG files still work with standard compression. Official `cjxl` downloads exist for Windows x64 and Linux x64; on other systems install `cjxl` yourself and make sure it is in your `PATH`.
 
 ## Color profiles
 
@@ -159,16 +176,17 @@ The console prints the address to open, e.g. `http://192.168.1.20:7842`. Other o
 
 ```
 Image-Upscale-W2X/
-├─ bin/        Real-ESRGAN-ncnn-vulkan executable (downloaded by setup)
+├─ bin/        engine, OxiPNG and cjxl (downloaded by setup)
 ├─ models/     the models you downloaded
 ├─ output/     your upscaled images
 ├─ public/     the web UI (fonts included – nothing is loaded from a CDN)
+├─ lib/        installer code
 ├─ scripts/    setup script
 ├─ node_modules/
 └─ server.js
 ```
 
-Once the engine and at least one model are in place you can disconnect and keep working. The page is served by the local server only – there is **no service worker or browser cache trick**, so when the server is stopped the UI does not open any more. Delete the folder and nothing is left behind.
+Once the engine, the helpers and at least one model are in place you can disconnect and keep working. The page is served by the local server only – there is **no service worker or browser cache trick**, so when the server is stopped the UI does not open any more. Delete the folder and nothing is left behind.
 
 Temporary data (uploads, thumbnails) lives in `data/` and is wiped every time the server starts or stops.
 
@@ -209,7 +227,7 @@ Models of the [Real-ESRGAN](https://github.com/xinntao/Real-ESRGAN) family by **
 
 | Model | Native | Intended use | Author | License |
 |---|---|---|---|---|
-| \* realesr-general-wdn-x4v3 | 4× | General-purpose with denoising | Xintao Wang and contributors | Project: BSD 3-Clause; weights not individually verified |
+| realesr-general-wdn-x4v3 | 4× | General-purpose with denoising | Xintao Wang and contributors | Project: BSD 3-Clause; weights not individually verified |
 | realesr-general-x4v3 | 4× | General-purpose | Xintao Wang and contributors | Project: BSD 3-Clause; weights not individually verified |
 | realesrgan-x4plus | 4× | General images, slow | Xintao Wang and contributors | Project: BSD 3-Clause; weights not individually verified |
 | realesrgan-x4plus-anime | 4× | Anime and illustration | Xintao Wang and contributors | Project: BSD 3-Clause; weights not individually verified |
@@ -223,6 +241,8 @@ Models of the [Real-ESRGAN](https://github.com/xinntao/Real-ESRGAN) family by **
 - **"The GPU driver stopped responding"** (Vulkan *device lost*) – update the graphics driver and use *Compatibility mode*.
 - **CPU processing** – the engine has no native CPU mode. If your system has a *software* Vulkan driver (Mesa `llvmpipe` on Linux), it shows up in the list as `CPU (software)` and works, but it is very slow. Otherwise the CPU entry is shown as unavailable.
 - **A job fails on an integrated GPU (for example AMD Vega in a Ryzen APU)** – the app already retries once with safe settings (one thread, small tiles) and remembers this for the device. You can also tick **Advanced → Compatibility mode** to use them from the start. If it still fails, open *Engine output* under the error message, and update your graphics driver. If the message really is about memory, raise the video memory allocation (UMA Frame Buffer Size) in the BIOS.
+- **JPEG XL result does not open in my viewer** – JPEG XL support is still patchy. Use AVIF or PNG for maximum compatibility, or a JPEG XL-aware viewer.
+- **Saving a big file takes long** – PNG optimization (try *Fast* in Advanced), AVIF and JPEG XL encoding are CPU-heavy. The animated bar and the timer on the file row show that it is still working.
 - **A model download fails** – check your internet connection and press *Download* again.
 - **Port already in use** – start with `--port 7843`.
 - **Something else** – read the console window of the server; engine errors appear there.
@@ -237,6 +257,7 @@ Image Upscale W2X itself is released under the [MIT License](LICENSE). It stands
 
 - [**Real-ESRGAN-ncnn-vulkan**](https://github.com/xinntao/Real-ESRGAN-ncnn-vulkan) by xinntao (MIT) – the upscaling engine, downloaded at setup.
 - [**Real-ESRGAN**](https://github.com/xinntao/Real-ESRGAN) by Xintao Wang and contributors, and [**Waifu2x-Extension-GUI**](https://github.com/AaronFeng753/Waifu2x-Extension-GUI) by Aaron Feng – the origin of the models listed above.
+- [**OxiPNG**](https://github.com/oxipng/oxipng) (MIT) and [**libjxl**](https://github.com/libjxl/libjxl) (`cjxl`, BSD 3-Clause) – optional helper programs, downloaded at setup, not part of this repository.
 - [**sharp**](https://sharp.pixelplumbing.com/) (Apache-2.0) and [**adm-zip**](https://github.com/cthackers/adm-zip) (MIT).
 - [**Geist** and **Geist Mono**](https://github.com/vercel/geist-font) fonts (SIL OFL 1.1, see `public/fonts/OFL-Geist.txt`).
 - The project intentionally has no build step: edit `server.js` or the files in `public/` and reload.

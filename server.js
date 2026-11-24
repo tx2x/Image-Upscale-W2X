@@ -27,6 +27,7 @@ try { sharp = require('sharp'); } catch {
   process.exit(1);
 }
 sharp.cache(false);
+const { TOOLS, findTool, installTool } = require('./lib/install');
 
 /* ───────────────────────── configuration ───────────────────────── */
 const argv = process.argv.slice(2);
@@ -53,7 +54,10 @@ const BIN = process.env.W2X_BIN || path.join(ROOT, 'bin', process.platform === '
 const VERSION = require('./package.json').version;
 
 const SCALES = [1.5, 2, 3, 4];
-const FORMATS = { png: 'image/png', jpg: 'image/jpeg', webp: 'image/webp' };
+const FORMATS = { png: 'image/png', jpg: 'image/jpeg', webp: 'image/webp', avif: 'image/avif', jxl: 'image/jxl' };
+const FORMAT_NAMES = { png: 'PNG', jpg: 'JPEG', webp: 'WebP', avif: 'AVIF', jxl: 'JPEG XL' };
+const PNG_LEVELS = { fast: '1', balanced: '3', max: '6' }; // OxiPNG -o levels
+const MAX_SIDE = { webp: 16383, jpg: 65535 };
 
 const MODEL_BASE = 'https://huggingface.co/rnsoc1/w2xex-model-mirror/resolve/main/models';
 const AUTHOR_W2X = 'Aaron Feng (Waifu2x-Extension-GUI). Underlying training authorship not independently established.';
@@ -71,7 +75,7 @@ const CATALOG = [
   { id: 'Omni-TurboV1.5-W2xEX', label: 'Omni Turbo V1.5', scale: 2, group: W, size: 0.7, desc: 'Fast general-purpose model.', author: AUTHOR_W2X, license: LIC_NONE },
   { id: 'Omni-MiniV2-W2xEX', label: 'Omni Mini V2', scale: 2, group: W, size: 0.2, desc: 'Lightweight general-purpose model, extremely fast, lowest quality.', author: AUTHOR_W2X, license: LIC_NONE },
   { id: 'AnimeVideo-MiniV1.8-W2xEX', label: 'AnimeVideo Mini V1.8', scale: 2, group: W, size: 0.1, desc: 'Very fast anime model made for video.', author: AUTHOR_W2X, license: LIC_NONE },
-  { id: 'realesr-general-wdn-x4v3', label: 'General WDN v3', scale: 4, rec: true, group: R, size: 2.5, desc: 'General-purpose with extra denoising. Native 4×.', author: AUTHOR_RE, license: LIC_RE },
+  { id: 'realesr-general-wdn-x4v3', label: 'General WDN v3', scale: 4, group: R, size: 2.5, desc: 'General-purpose with extra denoising. Native 4×.', author: AUTHOR_RE, license: LIC_RE },
   { id: 'realesr-general-x4v3', label: 'General v3', scale: 4, group: R, size: 2.5, desc: 'General-purpose, keeps more texture than the WDN variant. Native 4×.', author: AUTHOR_RE, license: LIC_RE },
   { id: 'realesrgan-x4plus', label: 'x4plus', scale: 4, group: R, size: 33.5, desc: 'Classic general-purpose image model. Native 4×, slow.', author: AUTHOR_RE, license: LIC_RE },
   { id: 'realesrgan-x4plus-anime', label: 'x4plus Anime', scale: 4, group: R, size: 9, desc: 'Anime and illustration model. Native 4×.', author: AUTHOR_RE, license: LIC_RE },
@@ -211,83 +215,68 @@ function crc32(buf) {
   for (let i = 0; i < buf.length; i++) c = CRC_TABLE[(c ^ buf[i]) & 0xff] ^ (c >>> 8);
   return (c ^ 0xffffffff) >>> 0;
 }
-// The engine ignores profiles, so after upscaling we attach the original profile to the file without touching pixels.
-function embedIccPng(buf, icc, name) {
+// EXIF as stored in a PNG eXIf chunk: the bare TIFF block, with the orientation reset because we already rotated the pixels.
+function exifToTiff(buf) {
+  if (!buf) return null;
+  let i = buf.indexOf(Buffer.from('II*\0'));
+  if (i < 0) i = buf.indexOf(Buffer.from('MM\0*'));
+  if (i < 0) return null;
+  const t = Buffer.from(buf.subarray(i));
+  try {
+    const le = t.toString('latin1', 0, 2) === 'II';
+    const u16 = (o) => (le ? t.readUInt16LE(o) : t.readUInt16BE(o));
+    const u32 = (o) => (le ? t.readUInt32LE(o) : t.readUInt32BE(o));
+    const ifd = u32(4), n = u16(ifd);
+    for (let k = 0; k < n; k++) {
+      const e = ifd + 2 + k * 12;
+      if (u16(e) === 0x0112) { if (le) t.writeUInt16LE(1, e + 8); else t.writeUInt16BE(1, e + 8); }
+    }
+  } catch { return null; }
+  return t;
+}
+const pngChunk = (type, data) => {
+  const head = Buffer.alloc(8); head.writeUInt32BE(data.length, 0); head.write(type, 4, 'latin1');
+  const crc = Buffer.alloc(4); crc.writeUInt32BE(crc32(Buffer.concat([head.subarray(4), data])), 0);
+  return Buffer.concat([head, data, crc]);
+};
+/**
+ * The engine drops all metadata. We rebuild exactly what should survive (color profile, EXIF, XMP) as PNG chunks,
+ * without touching the pixels; every encoder below then carries those chunks over into its own format.
+ */
+function buildTaggedPng(buf, { icc, iccLabel, exif, xmp }) {
   const chunks = [];
   for (let off = 8; off < buf.length;) {
     const len = buf.readUInt32BE(off);
     chunks.push({ type: buf.toString('latin1', off + 4, off + 8), data: buf.subarray(off + 8, off + 8 + len) });
     off += 12 + len;
   }
-  const keyword = (name || 'ICC profile').replace(/[^\x20-\x7e]/g, '_').slice(0, 79);
-  const data = Buffer.concat([Buffer.from(keyword + '\0', 'latin1'), Buffer.from([0]), zlib.deflateSync(icc)]);
-  const kept = chunks.filter((c) => !['iCCP', 'sRGB', 'gAMA', 'cHRM'].includes(c.type));
-  kept.splice(1, 0, { type: 'iCCP', data });
-  const parts = [buf.subarray(0, 8)];
-  for (const c of kept) {
-    const head = Buffer.alloc(8); head.writeUInt32BE(c.data.length, 0); head.write(c.type, 4, 'latin1');
-    const crc = Buffer.alloc(4); crc.writeUInt32BE(crc32(Buffer.concat([head.subarray(4), c.data])), 0);
-    parts.push(head, c.data, crc);
+  const kept = chunks.filter((c) => !['iCCP', 'sRGB', 'gAMA', 'cHRM', 'eXIf'].includes(c.type) && !(c.type === 'iTXt' && c.data.toString('latin1', 0, 17) === 'XML:com.adobe.xmp'));
+  const add = [];
+  if (icc) {
+    const keyword = (iccLabel || 'ICC profile').replace(/[^\x20-\x7e]/g, '_').slice(0, 79);
+    add.push(pngChunk('iCCP', Buffer.concat([Buffer.from(keyword + '\0', 'latin1'), Buffer.from([0]), zlib.deflateSync(icc)])));
   }
-  return Buffer.concat(parts);
-}
-function embedIccJpeg(buf, icc) {
-  let pos = 2;
-  if (buf[2] === 0xff && buf[3] === 0xe0) pos = 4 + buf.readUInt16BE(4);
-  const max = 65519, count = Math.ceil(icc.length / max), segs = [];
-  for (let i = 0; i < count; i++) {
-    const data = icc.subarray(i * max, (i + 1) * max);
-    const head = Buffer.alloc(18);
-    head[0] = 0xff; head[1] = 0xe2; head.writeUInt16BE(2 + 12 + 2 + data.length, 2);
-    head.write('ICC_PROFILE\0', 4, 'latin1'); head[16] = i + 1; head[17] = count;
-    segs.push(head, data);
-  }
-  return Buffer.concat([buf.subarray(0, pos), ...segs, buf.subarray(pos)]);
-}
-function embedIccWebp(buf, icc, w, h, alpha) {
-  const chunks = [];
-  for (let off = 12; off + 8 <= buf.length;) {
-    const size = buf.readUInt32LE(off + 4);
-    chunks.push({ id: buf.toString('latin1', off, off + 4), data: buf.subarray(off + 8, off + 8 + size) });
-    off += 8 + size + (size & 1);
-  }
-  const rest = chunks.filter((c) => c.id !== 'ICCP' && c.id !== 'VP8X');
-  const oldX = chunks.find((c) => c.id === 'VP8X');
-  let x;
-  if (oldX) { x = Buffer.from(oldX.data); x[0] |= 0x20; }
-  else {
-    x = Buffer.alloc(10); x[0] = 0x20 | (alpha ? 0x10 : 0);
-    x.writeUIntLE(w - 1, 4, 3); x.writeUIntLE(h - 1, 7, 3);
-  }
-  const out = [{ id: 'VP8X', data: x }, { id: 'ICCP', data: icc }, ...rest];
-  const body = Buffer.concat(out.map((c) => {
-    const head = Buffer.alloc(8); head.write(c.id, 0, 'latin1'); head.writeUInt32LE(c.data.length, 4);
-    return Buffer.concat([head, c.data, c.data.length & 1 ? Buffer.alloc(1) : Buffer.alloc(0)]);
-  }));
-  const riff = Buffer.alloc(12); riff.write('RIFF', 0, 'latin1'); riff.writeUInt32LE(body.length + 4, 4); riff.write('WEBP', 8, 'latin1');
-  return Buffer.concat([riff, body]);
-}
-async function attachProfile(file, format, icc, name, w, h, alpha) {
-  const buf = await fsp.readFile(file);
-  const out = format === 'png' ? embedIccPng(buf, icc, name) : format === 'jpg' ? embedIccJpeg(buf, icc) : embedIccWebp(buf, icc, w, h, alpha);
-  await fsp.writeFile(file, out);
+  if (exif) add.push(pngChunk('eXIf', exif));
+  if (xmp) add.push(pngChunk('iTXt', Buffer.concat([Buffer.from('XML:com.adobe.xmp\0\0\0\0\0', 'latin1'), xmp])));
+  const first = kept.shift();
+  return Buffer.concat([buf.subarray(0, 8), pngChunk(first.type, first.data), ...add, ...kept.map((c) => pngChunk(c.type, c.data))]);
 }
 
 /* ───────────────────────── items ───────────────────────── */
 function publicItem(it) {
   return {
     id: it.id, name: it.name, relPath: it.relPath, width: it.width, height: it.height,
-    format: it.format, size: it.size, version: it.version, error: it.error || null, errorDetail: it.errorDetail || null, profile: it.profileName || null, profileUsable: !!it.profileUsable,
+    format: it.format, size: it.size, version: it.version, error: it.error || null, errorDetail: it.errorDetail || null, hasMetadata: !!it.hasMeta, profile: it.profileName || null, profileUsable: !!it.profileUsable,
     results: Object.values(it.results).map((r) => ({
       key: r.key, model: r.model, scale: r.scale, format: r.format, width: r.width, height: r.height,
-      size: r.size, name: r.name, ms: r.ms, device: r.device, at: r.at, profile: r.profile,
+      size: r.size, name: r.name, ms: r.ms, device: r.device, at: r.at, profile: r.profile, metadata: !!r.metadata,
     })),
   };
 }
 function publicJobs() {
   return jobs.map((j) => ({
     id: j.id, itemId: j.itemId, status: j.status, percent: Math.round(j.percent * 10) / 10,
-    pass: j.pass, passes: j.passes, model: j.params.model, scale: j.params.scale,
+    pass: j.pass, passes: j.passes, model: j.params.model, scale: j.params.scale, stage: j.stage, label: j.label,
   }));
 }
 const emitItem = (it) => broadcast('item', publicItem(it));
@@ -328,6 +317,8 @@ async function handleUpload(req, res, url) {
     const profileUsable = !!icc && icc.toString('latin1', 16, 20) === 'RGB ' && meta.space !== 'cmyk';
     let profileName = icc ? (iccName(icc) || 'Embedded profile') : null;
     if (icc && !profileUsable) profileName += ' (converted to sRGB)';
+    const exifTiff = exifToTiff(meta.exif);
+    const xmp = meta.xmp && meta.xmp.length ? Buffer.from(meta.xmp) : null;
     const needConvert = !native || (meta.orientation || 1) > 1 || meta.space === 'cmyk' || (meta.pages || 1) > 1;
 
     let inputPath;
@@ -349,7 +340,7 @@ async function handleUpload(req, res, url) {
     const item = {
       id, name, relPath, width, height, format: display, size: stat.size, version: Date.now(),
       inputPath, thumbPath: path.join(dir, 'thumb.webp'), inputMime: mimeFor(inputPath), results: {}, error: null,
-      profileName, profileUsable,
+      profileName, profileUsable, exifTiff, xmp, hasMeta: !!(exifTiff || xmp),
     };
     items.set(id, item);
     emitItem(item);
@@ -367,11 +358,12 @@ function validateParams(p) {
   const scale = Number(p.scale);
   if (!SCALES.includes(scale)) throw new Error('Unsupported scale');
   const format = FORMATS[p.format] ? p.format : 'png';
+  if (format === 'jxl' && !findTool('cjxl')) throw new Error('The JPEG XL encoder is not installed. Install it from the Output format section.');
   const device = Number(p.device);
   if (!Number.isInteger(device) || device < 0) throw new Error('Select a Vulkan device first');
   let tile = Number(p.tile) || 0;
   if (tile !== 0 && (tile < 32 || tile > 8192)) tile = 0;
-  return { model: model.id, modelLabel: model.label, native: model.scale, scale, format, device, tile: Math.round(tile), tta: !!p.tta, profile: p.profile === 'srgb' ? 'srgb' : 'keep', safe: !!p.safe };
+  return { model: model.id, modelLabel: model.label, native: model.scale, scale, format, device, tile: Math.round(tile), tta: !!p.tta, profile: p.profile === 'srgb' ? 'srgb' : 'keep', safe: !!p.safe, metadata: p.metadata !== false, pngOpt: PNG_LEVELS[p.pngOpt] ? p.pngOpt : 'balanced' };
 }
 // 'none' = the image has no usable RGB profile, so the setting makes no difference.
 const profileModeFor = (it, wanted) => (it.profileUsable ? wanted : 'none');
@@ -384,11 +376,11 @@ function enqueue(itemIds, rawParams, force) {
     const it = items.get(id);
     if (!it) continue;
     const profileMode = profileModeFor(it, params.profile);
-    const key = `${params.model}~${params.scale}~${params.format}~${profileMode}`;
+    const key = `${params.model}~${params.scale}~${params.format}~${profileMode}${it.hasMeta ? (params.metadata ? '~m' : '~n') : ''}`;
     if (jobs.some((j) => j.itemId === id && j.key === key)) continue;
     if (!force && it.results[key]) continue;
     it.error = null; it.errorDetail = null;
-    jobs.push({ id: ++jobSeq, itemId: id, params, key, profileMode, status: 'queued', percent: 0, pass: 1, passes: 1, canceled: false, child: null, startedAt: 0 });
+    jobs.push({ id: ++jobSeq, itemId: id, params, key, profileMode, status: 'queued', percent: 0, pass: 1, passes: 1, stage: 'engine', label: '', canceled: false, child: null, startedAt: 0 });
     emitItem(it);
     added++;
   }
@@ -494,22 +486,55 @@ function uniqueOutputPath(it, stem, key, ext) {
   }
 }
 
+const QUALITY = { jpg: 95, webp: 95, avif: 80, jxl: 90 };
+
+// After the engine is done, saving can take a while (large PNG optimization, AVIF/JXL encoding): tell the UI what is going on.
+function setStage(job, label) {
+  job.stage = 'finish';
+  job.label = label;
+  broadcast('progress', { jobId: job.id, itemId: job.itemId, percent: 100, pass: job.passes, passes: job.passes, stage: 'finish', label });
+  emitQueue();
+}
+
+function runTool(exe, args, job) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(exe, args, { cwd: ROOT, windowsHide: true });
+    job.child = child;
+    let out = '';
+    child.stdout.on('data', (d) => { out = (out + d).slice(-2000); });
+    child.stderr.on('data', (d) => { out = (out + d).slice(-2000); });
+    child.on('error', (e) => { job.child = null; reject(new Error(`Could not start ${path.basename(exe)}: ${e.message}`)); });
+    child.on('close', (code) => {
+      job.child = null;
+      if (job.canceled) return reject(new Error('Canceled'));
+      if (code === 0) return resolve();
+      const last = out.trim().split(/\r?\n/).filter(Boolean).slice(-1)[0] || '';
+      reject(new Error(`${path.basename(exe)} failed (exit code ${code})${last ? ': ' + last.slice(0, 160) : ''}`));
+    });
+  });
+}
+
 async function runJob(job, it) {
   const p = job.params;
   const key = job.key;
   const t0 = Date.now();
+  const targetW = Math.max(1, Math.round(it.width * p.scale));
+  const targetH = Math.max(1, Math.round(it.height * p.scale));
+  if (MAX_SIDE[p.format] && Math.max(targetW, targetH) > MAX_SIDE[p.format]) {
+    throw new Error(`The result (${targetW}×${targetH}) is too large for ${FORMAT_NAMES[p.format]} (maximum ${MAX_SIDE[p.format]} px per side). Choose PNG, AVIF or JPEG XL, or a smaller factor.`);
+  }
   await fsp.mkdir(OUT_DIR, { recursive: true });
   const tmp = path.join(TMP_DIR, String(job.id));
   await fsp.mkdir(tmp, { recursive: true });
   try {
     // Colour profile handling. The engine works on raw RGB values and ignores profiles.
-    let engineInput = it.inputPath, icc = null, iccName_ = null;
+    let engineInput = it.inputPath, icc = null, iccLabel = null;
     if (job.profileMode === 'srgb') {
       engineInput = path.join(tmp, 'srgb.png');
       await sharp(it.inputPath, { limitInputPixels: false }).withIccProfile('srgb', { attach: false }).png({ compressionLevel: 1 }).toFile(engineInput);
     } else if (job.profileMode === 'keep') {
       icc = (await sharp(it.inputPath, { limitInputPixels: false }).metadata()).icc || null;
-      iccName_ = icc ? iccName(icc) : null;
+      iccLabel = icc ? iccName(icc) : null;
     }
 
     // How many native-scale passes are needed to reach (at least) the target?
@@ -555,30 +580,73 @@ async function runJob(job, it) {
     }
 
     job.percent = 100;
-    const targetW = Math.max(1, Math.round(it.width * p.scale));
-    const targetH = Math.max(1, Math.round(it.height * p.scale));
     const stem = `${it.name.replace(/\.[^.]*$/, '') || 'image'}_${p.model}_x${p.scale}${job.profileMode === 'srgb' ? '_srgb' : ''}`.replace(/[\\/:*?"<>|]/g, '_');
     const finalPath = uniqueOutputPath(it, stem, key, p.format);
     const partPath = finalPath + '.part';
+    const checkCanceled = () => { if (job.canceled) throw new Error('Canceled'); };
 
-    let img = sharp(current, { limitInputPixels: false });
-    const meta = await img.metadata();
-    if (meta.width !== targetW || meta.height !== targetH) img = img.resize(targetW, targetH, { kernel: 'lanczos3', fit: 'fill' });
-    if (p.format === 'png') img = img.png({ compressionLevel: 6 });
-    else if (p.format === 'jpg') img = img.flatten({ background: '#ffffff' }).jpeg({ quality: 95, chromaSubsampling: '4:4:4', mozjpeg: true });
-    else img = img.webp({ quality: 95 });
-    await img.toFile(partPath);
-    if (icc) await attachProfile(partPath, p.format, icc, iccName_, targetW, targetH, !!meta.hasAlpha && p.format !== 'jpg');
+    // 1) bring the upscaled picture to the exact target size
+    let png = await fsp.readFile(current);
+    const meta = await sharp(png, { limitInputPixels: false }).metadata();
+    if (meta.width !== targetW || meta.height !== targetH) {
+      setStage(job, `Resizing to ${targetW}×${targetH}`);
+      png = await sharp(png, { limitInputPixels: false }).resize(targetW, targetH, { kernel: 'lanczos3', fit: 'fill' }).png({ compressionLevel: 1 }).toBuffer();
+      checkCanceled();
+    }
+
+    // 2) re-attach what should survive: color profile, EXIF, XMP (the engine drops all of it)
+    const useMeta = p.metadata && it.hasMeta;
+    const tagged = buildTaggedPng(png, { icc, iccLabel, exif: useMeta ? it.exifTiff : null, xmp: useMeta ? it.xmp : null });
+    png = null;
+    const taggedPath = path.join(tmp, 'tagged.png');
+    await fsp.writeFile(taggedPath, tagged);
+    checkCanceled();
+
+    // 3) encode. Only keep what we put into the tagged PNG; keepMetadata() would add a technical EXIF stub of its own.
+    const keepWanted = (img) => (useMeta ? img.keepMetadata() : icc ? img.keepIccProfile() : img);
+    const fmtName = FORMAT_NAMES[p.format];
+    let previewFile = null;
+    if (p.format === 'png') {
+      const oxipng = findTool('oxipng');
+      let optimized = false;
+      if (oxipng) {
+        setStage(job, 'Optimizing PNG with OxiPNG');
+        try { await runTool(oxipng, ['-o', PNG_LEVELS[p.pngOpt], '-q', '--out', partPath, taggedPath], job); optimized = true; }
+        catch (err) { if (job.canceled) throw err; console.warn(`  OxiPNG failed (${err.message}); saving without optimization.`); }
+      }
+      if (!optimized) {
+        setStage(job, 'Saving PNG');
+        await keepWanted(sharp(taggedPath, { limitInputPixels: false })).png({ compressionLevel: 9 }).toFile(partPath);
+      }
+    } else if (p.format === 'jxl') {
+      setStage(job, 'Encoding JPEG XL');
+      previewFile = path.join(UPLOADS_DIR, it.id, `preview_${job.id}.png`); // browsers cannot show JPEG XL reliably
+      await fsp.copyFile(taggedPath, previewFile);
+      await runTool(findTool('cjxl'), [taggedPath, partPath, '-q', String(QUALITY.jxl), '-e', '7', '--quiet'], job);
+    } else {
+      setStage(job, `Encoding ${fmtName}`);
+      let img = keepWanted(sharp(taggedPath, { limitInputPixels: false }));
+      if (p.format === 'jpg') img = img.flatten({ background: '#ffffff' }).jpeg({ quality: QUALITY.jpg, chromaSubsampling: '4:4:4', mozjpeg: true });
+      else if (p.format === 'webp') img = img.webp({ quality: QUALITY.webp });
+      else img = img.avif({ quality: QUALITY.avif, effort: 4, chromaSubsampling: '4:4:4' });
+      await img.toFile(partPath);
+    }
+    checkCanceled();
+    setStage(job, 'Saving file');
     await fsp.rename(partPath, finalPath);
 
     const stat = await fsp.stat(finalPath);
     const prev = it.results[key];
-    if (prev && prev.file !== finalPath) claimedOutputs.delete(prev.file);
+    if (prev) {
+      if (prev.file !== finalPath) claimedOutputs.delete(prev.file);
+      if (prev.previewFile) await fsp.rm(prev.previewFile, { force: true });
+    }
     claimedOutputs.set(finalPath, it.id);
     const dev = (deviceCache || []).find((d) => d.id === p.device);
     it.results[key] = {
       key, model: p.model, scale: p.scale, format: p.format, width: targetW, height: targetH, size: stat.size,
-      file: finalPath, name: path.basename(finalPath), ms: Date.now() - t0, device: dev ? `${dev.type === 'cpu' ? 'CPU' : 'GPU ' + dev.id} (${dev.name})` : `Device ${p.device}`, at: Date.now(), profile: job.profileMode,
+      file: finalPath, previewFile, name: path.basename(finalPath), ms: Date.now() - t0, at: Date.now(), profile: job.profileMode, metadata: useMeta,
+      device: dev ? `${dev.type === 'cpu' ? 'CPU' : 'GPU ' + dev.id} (${dev.name})` : `Device ${p.device}`,
     };
   } finally {
     await fsp.rm(tmp, { recursive: true, force: true });
@@ -636,6 +704,38 @@ async function downloadModel(entry) {
   emitModel(entry);
 }
 
+/* ───────────────────────── optional tools (OxiPNG, cjxl) ───────────────────────── */
+const toolInstalls = new Map(); // id -> { state, received, total, error }
+function toolState(id) {
+  const t = TOOLS[id], d = toolInstalls.get(id), spec = t.spec();
+  const installed = !!findTool(id);
+  return {
+    id, label: t.label, installed, installable: !!spec, sizeMB: t.sizeMB,
+    state: d ? d.state : installed ? 'installed' : 'idle', received: d ? d.received : 0, total: d ? d.total : 0, error: d ? d.error : null,
+  };
+}
+const emitTool = (id) => broadcast('tool', toolState(id));
+async function installToolJob(id) {
+  const st = { state: 'downloading', received: 0, total: Math.round(TOOLS[id].sizeMB * 1048576), error: null };
+  toolInstalls.set(id, st);
+  emitTool(id);
+  let last = 0;
+  try {
+    await installTool(id, (got, total) => {
+      st.received = got; if (total) st.total = total;
+      const now = Date.now();
+      if (now - last > 250) { last = now; emitTool(id); }
+    });
+    toolInstalls.delete(id);
+    console.log(`  Tool installed: ${TOOLS[id].label}`);
+  } catch (err) {
+    st.state = 'error';
+    st.error = err.message === 'fetch failed' ? 'Could not reach the download server. Check your internet connection and try again.' : err.message;
+    console.error(`  Tool install failed: ${TOOLS[id].label} | ${st.error}`);
+  }
+  emitTool(id);
+}
+
 /* ───────────────────────── routes ───────────────────────── */
 const routes = [];
 const route = (method, re, fn) => routes.push({ method, re, fn });
@@ -644,7 +744,7 @@ route('GET', /^\/api\/info$/, async (req, res) => {
   const devices = await detectDevices(false);
   send(res, 200, {
     name: 'Image Upscale W2X', version: VERSION, mode: NETWORK_MODE ? 'network' : 'local',
-    engineReady: binaryReady(), defaultModel: DEFAULT_MODEL, models: listModels(), devices, scales: SCALES, outputDir: OUT_DIR,
+    engineReady: binaryReady(), tools: Object.keys(TOOLS).map(toolState), defaultModel: DEFAULT_MODEL, models: listModels(), devices, scales: SCALES, outputDir: OUT_DIR,
     canOpenFolder: !NETWORK_MODE,
   });
 });
@@ -680,6 +780,7 @@ route('DELETE', /^\/api\/items\/([a-f0-9]+)\/result\/([^/]+)$/, async (req, res,
   const r = it && it.results[key];
   if (!r) return send(res, 404, { error: 'Not found' });
   if (r.file.startsWith(OUT_DIR + path.sep)) await fsp.rm(r.file, { force: true });
+  if (r.previewFile) await fsp.rm(r.previewFile, { force: true });
   claimedOutputs.delete(r.file);
   delete it.results[key];
   emitItem(it);
@@ -704,6 +805,7 @@ route('GET', /^\/api\/items\/([a-f0-9]+)\/result\/([^/]+)$/, (req, res, m, url) 
   const it = items.get(m[1]);
   const r = it && it.results[decodeURIComponent(m[2])];
   if (!r) return send(res, 404, { error: 'Not found' });
+  if (url.searchParams.get('preview') === '1' && r.previewFile && exists(r.previewFile)) return serveFile(req, res, r.previewFile, 'image/png');
   serveFile(req, res, r.file, FORMATS[r.format], url.searchParams.get('download') === '1');
 });
 
@@ -722,6 +824,15 @@ route('POST', /^\/api\/open-output$/, async (req, res) => {
 });
 
 const LOCAL_ADDR = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
+route('GET', /^\/api\/tools$/, async (req, res) => send(res, 200, { tools: Object.keys(TOOLS).map(toolState) }));
+route('POST', /^\/api\/tools\/install$/, async (req, res) => {
+  if (!LOCAL_ADDR.has(req.socket.remoteAddress)) return send(res, 403, { error: 'Tools can only be installed from the computer that runs the server.' });
+  const body = await readJson(req);
+  if (!TOOLS[body.id]) return send(res, 400, { error: 'Unknown tool' });
+  const cur = toolInstalls.get(body.id);
+  if (!(cur && cur.state === 'downloading') && !findTool(body.id)) installToolJob(body.id);
+  send(res, 200, { ok: true });
+});
 route('GET', /^\/api\/models$/, async (req, res) => send(res, 200, { models: CATALOG_ORDERED.map(modelState) }));
 route('POST', /^\/api\/models\/download$/, async (req, res) => {
   if (!LOCAL_ADDR.has(req.socket.remoteAddress)) return send(res, 403, { error: 'Models can only be downloaded from the computer that runs the server.' });

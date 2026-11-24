@@ -3,6 +3,26 @@
 All notable changes to **Image Upscale W2X** are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses [Semantic Versioning](https://semver.org/).
 
+## [1.6.0] - 2026-11-24
+
+### Added
+- **AVIF** and **JPEG XL** output formats (AVIF quality 80, JPEG XL quality 90).
+- **OxiPNG** optimization for PNG output, with a *PNG optimization* level in Advanced (Fast, Balanced, Maximum). Falls back to standard PNG compression when OxiPNG is missing.
+- **Keep metadata** switch: copies EXIF and XMP of the original into PNG, JPEG, WebP, AVIF and JPEG XL results, with the EXIF orientation reset because the pixels are already rotated. With the switch off, no camera or location data is written (the color profile still follows its own setting).
+- **Saving indicator**: after the upscale finishes, the file row shows an animated bar, the current step (resizing, optimizing PNG, encoding AVIF/JPEG XL, saving) and a running timer, so long saves no longer look frozen.
+- On-demand **install of OxiPNG and the JPEG XL encoder** from the web interface, with a progress bar. The first-run setup now downloads them too (`--skip-tools` to skip).
+- Early, readable errors when a result would exceed a format's size limit (WebP 16 383 px, JPEG 65 535 px).
+- Compare mode shows a lossless preview for JPEG XL results, since browsers cannot reliably display the format.
+
+### Fixed
+- Layout of the *Keep metadata* switch in the settings panel: it no longer overlaps its label, and its on/off state is clear (outlined when off, accent color when on, with an On/Off label).
+
+### Changed
+- **Output format** moved out of *Advanced* to the main settings panel, above *Color profile*.
+- `realesr-general-wdn-x4v3` is no longer marked as recommended (three recommended models remain).
+- Encoding pipeline rebuilt: the color profile, EXIF and XMP are re-attached to a lossless intermediate PNG and carried into the chosen format without touching pixel values.
+- Release notes of earlier versions moved to `docs/release-notes/`.
+
 ## [1.5.0] - 2026-11-23
 
 ### Added

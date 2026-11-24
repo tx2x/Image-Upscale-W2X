@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Image Upscale W2X</title>
+  <meta name="color-scheme" content="light dark">
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <script>
+    // Apply the saved theme before first paint to avoid a flash.
+    try { var t = localStorage.getItem('w2x.theme'); if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t; } catch (e) {}
+  </script>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="./" aria-label="Image Upscale W2X">
+      <svg class="logo" viewBox="0 0 32 32" aria-hidden="true">
+        <rect x="3" y="3" width="14" height="14" rx="2" class="l-big"/>
+        <g class="l-mid"><rect x="20" y="3" width="4.5" height="4.5"/><rect x="26" y="3" width="4.5" height="4.5"/><rect x="20" y="9" width="4.5" height="4.5"/><rect x="26" y="9" width="4.5" height="4.5"/><rect x="3" y="20" width="4.5" height="4.5"/><rect x="9" y="20" width="4.5" height="4.5"/><rect x="3" y="26" width="4.5" height="4.5"/><rect x="9" y="26" width="4.5" height="4.5"/></g>
+        <g class="l-fine"><rect x="20" y="20" width="2.4" height="2.4"/><rect x="23.4" y="20" width="2.4" height="2.4"/><rect x="26.8" y="20" width="2.4" height="2.4"/><rect x="20" y="23.4" width="2.4" height="2.4"/><rect x="23.4" y="23.4" width="2.4" height="2.4"/><rect x="26.8" y="23.4" width="2.4" height="2.4"/><rect x="20" y="26.8" width="2.4" height="2.4"/><rect x="23.4" y="26.8" width="2.4" height="2.4"/><rect x="26.8" y="26.8" width="2.4" height="2.4"/></g>
+      </svg>
+      <span>Image Upscale W2X</span>
+    </a>
+    <span id="netPill" class="pill warn" hidden title="The server is reachable from other devices on your network">Network mode</span>
+    <div class="spacer"></div>
+    <div class="seg" role="radiogroup" aria-label="Theme" id="themeSeg">
+      <button role="radio" data-theme="auto" title="Follow system theme"><svg viewBox="0 0 24 24"><rect width="20" height="14" x="2" y="3" rx="2"/><path d="M8 21h8M12 17v4"/></svg><span>Auto</span></button>
+      <button role="radio" data-theme="light" title="Light theme"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg><span>Light</span></button>
+      <button role="radio" data-theme="dark" title="Dark theme"><svg viewBox="0 0 24 24"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg><span>Dark</span></button>
+    </div>
+  </header>
+
+  <main class="layout">
+    <aside class="panel settings" aria-label="Settings">
+      <div id="warn" class="notice" hidden></div>
+
+      <div class="field">
+        <label for="model">Model</label>
+        <div class="select"><select id="model"></select></div>
+        <p class="hint" id="modelDesc"></p>
+        <button class="btn small" id="manageModels"><svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>Download models…</button>
+      </div>
+
+      <div class="field">
+        <label id="scaleLabel">Upscale factor</label>
+        <div class="seg wide" role="radiogroup" aria-labelledby="scaleLabel" id="scaleSeg"></div>
+        <p class="hint" id="scaleHint"></p>
+      </div>
+
+      <div class="field">
+        <label for="device">Processing device</label>
+        <div class="row">
+          <div class="select grow"><select id="device"></select></div>
+          <button class="icon-btn" id="rescan" title="Rescan devices" aria-label="Rescan devices"><svg viewBox="0 0 24 24"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></svg></button>
+        </div>
+        <p class="hint" id="deviceHint"></p>
+      </div>
+
+      <div class="field">
+        <label for="format">Output format</label>
+        <div class="select"><select id="format">
+          <option value="png">PNG (lossless)</option>
+          <option value="jpg">JPEG (quality 95)</option>
+          <option value="webp">WebP (quality 95)</option>
+          <option value="avif">AVIF (quality 80)</option>
+          <option value="jxl">JPEG XL (quality 90)</option>
+        </select></div>
+        <p class="hint" id="formatHint"></p>
+        <div class="toolnote" id="toolNote" hidden>
+          <div id="toolText"></div>
+          <button class="btn tone-green small" id="toolInstall"></button>
+          <div class="bar" id="toolBar" hidden><i></i></div>
+        </div>
+        <label class="switch"><input type="checkbox" id="metadata"><span class="track"><i></i></span><span class="sw-text">Keep metadata <small>EXIF, XMP</small></span><span class="sw-state" aria-hidden="true"></span></label>
+        <p class="hint" id="metaHint"></p>
+      </div>
+
+      <div class="field">
+        <label for="profile">Color profile</label>
+        <div class="select"><select id="profile">
+          <option value="keep">Keep the original profile</option>
+          <option value="srgb">Convert to sRGB</option>
+        </select></div>
+        <p class="hint" id="profileHint"></p>
+      </div>
+
+      <details class="adv">
+        <summary>Advanced</summary>
+        <div class="field" id="pngOptField">
+          <label for="pngOpt">PNG optimization (OxiPNG)</label>
+          <div class="select"><select id="pngOpt">
+            <option value="fast">Fast</option>
+            <option value="balanced">Balanced</option>
+            <option value="max">Maximum (slowest)</option>
+          </select></div>
+          <p class="hint">Higher levels make smaller PNG files but take longer to save.</p>
+        </div>
+        <div class="field">
+          <label for="tile">Tile size</label>
+          <div class="select"><select id="tile">
+            <option value="0">Auto</option>
+            <option value="100">100 (lowest memory)</option>
+            <option value="200">200</option>
+            <option value="400">400</option>
+            <option value="800">800</option>
+          </select></div>
+          <p class="hint">Smaller tiles use less GPU memory but are slower. Try this if processing fails.</p>
+        </div>
+        <label class="check"><input type="checkbox" id="safe"><span class="box"></span><span>Compatibility mode <small>(1 thread, small tiles – try this if your GPU fails)</small></span></label>
+        <label class="check"><input type="checkbox" id="tta"><span class="box"></span><span>TTA mode <small>(8× slower, slightly better quality)</small></span></label>
+      </details>
+
+      <div class="out">
+        <div class="out-title">Results are saved to</div>
+        <code id="outDir">output/</code>
+        <button class="btn ghost small" id="openOut" hidden>Open folder</button>
+      </div>
+    </aside>
+
+    <section class="workspace">
+      <div class="drop" id="drop" tabindex="0" role="button" aria-label="Add images">
+        <div class="drop-art" aria-hidden="true"></div>
+        <div class="drop-body">
+          <svg class="drop-icon" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" x2="12" y1="3" y2="15"/></svg>
+          <div>
+            <div class="drop-title">Drop images or folders here</div>
+            <div class="drop-sub">JPEG, PNG, WebP, TIFF, GIF and AVIF</div>
+          </div>
+          <div class="drop-actions">
+            <button class="btn" id="pickFiles">Choose files</button>
+            <button class="btn" id="pickDir">Choose folder</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="toolbar" id="toolbar" hidden>
+        <div class="count" id="count"></div>
+        <div class="spacer"></div>
+        <button class="btn ghost" id="clearAll">Clear list</button>
+        <button class="btn danger" id="stopAll" hidden>Stop</button>
+        <button class="btn primary" id="runAll"><svg viewBox="0 0 24 24"><polygon points="6 3 20 12 6 21 6 3"/></svg><span>Upscale all</span></button>
+      </div>
+
+      <ul class="list" id="list"></ul>
+    </section>
+  </main>
+
+  <dialog id="cmp" aria-label="Compare images">
+    <div class="cmp">
+      <div class="cmp-bar">
+        <div class="cmp-pick"><span class="tagA">A</span><div class="select"><select id="cmpA" aria-label="Image A"></select></div></div>
+        <button class="icon-btn" id="cmpSwap" title="Swap A and B" aria-label="Swap A and B"><svg viewBox="0 0 24 24"><path d="m16 3 4 4-4 4"/><path d="M20 7H4"/><path d="m8 21-4-4 4-4"/><path d="M4 17h16"/></svg></button>
+        <div class="cmp-pick"><span class="tagB">B</span><div class="select"><select id="cmpB" aria-label="Image B"></select></div></div>
+        <div class="spacer"></div>
+        <div class="seg" role="radiogroup" aria-label="View mode" id="cmpMode">
+          <button role="radio" data-mode="slider">Slider</button>
+          <button role="radio" data-mode="side">Side by side</button>
+        </div>
+        <label class="check small" id="nativeWrap" title="Show the original at its own resolution instead of stretching it to the result's size"><input type="checkbox" id="cmpNative"><span class="box"></span><span>Original at native size</span></label>
+        <div class="zoom">
+          <button class="icon-btn" id="zOut" aria-label="Zoom out"><svg viewBox="0 0 24 24"><path d="M5 12h14"/></svg></button>
+          <button class="btn ghost small mono" id="zLabel" title="Fit to window">Fit</button>
+          <button class="icon-btn" id="zIn" aria-label="Zoom in"><svg viewBox="0 0 24 24"><path d="M5 12h14"/><path d="M12 5v14"/></svg></button>
+          <button class="btn ghost small" id="z100" title="Actual size of the larger image">100%</button>
+        </div>
+        <button class="icon-btn" id="cmpClose" aria-label="Close"><svg viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
+      </div>
+      <div class="cmp-view" id="cmpView" data-mode="slider">
+        <div class="pane pane-a"><div class="layer"><img alt="" draggable="false"></div><span class="ptag" id="tagA"></span></div>
+        <div class="pane pane-b"><div class="layer"><img alt="" draggable="false"></div><span class="ptag" id="tagB"></span></div>
+        <div class="divider" id="divider"><div class="handle" tabindex="0" role="slider" aria-label="Comparison position" aria-valuemin="0" aria-valuemax="100"><svg viewBox="0 0 24 24"><path d="m9 7-5 5 5 5"/><path d="m15 7 5 5-5 5"/></svg></div></div>
+      </div>
+      <div class="cmp-foot" id="cmpFoot"></div>
+    </div>
+  </dialog>
+
+  <dialog id="models" aria-label="Download models">
+    <div class="mdl">
+      <div class="mdl-head">
+        <div>
+          <h2>Models</h2>
+          <p>Downloaded on request into the <code>models/</code> folder. Models marked with * are recommended.</p>
+        </div>
+        <button class="icon-btn" id="mdlClose" aria-label="Close"><svg viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
+      </div>
+      <div class="mdl-body" id="mdlList"></div>
+      <div class="mdl-foot">Image Upscale W2X does not contain any models. They belong to their respective authors; please read the license shown for each model before using it, especially commercially.</div>
+    </div>
+  </dialog>
+
+  <div id="toasts" aria-live="polite"></div>
+  <input type="file" id="fileInput" accept="image/jpeg,image/png,image/webp,image/tiff,image/gif,image/avif,.jpg,.jpeg,.png,.webp,.tif,.tiff,.gif,.avif" multiple hidden>
+  <input type="file" id="dirInput" webkitdirectory multiple hidden>
+  <script src="app.js"></script>
+</body>
+</html>
